@@ -1,0 +1,59 @@
+name: stronghold
+
+services:
+  stronghold:
+    image: "${STRONGHOLD_IMAGE:?Run python3 scripts/project.py configure}"
+    build:
+      context: "${STRONGHOLD_SOURCE_DIR:?Run python3 scripts/project.py configure}"
+      args:
+        FETCH_ASSETS: "${FETCH_ASSETS:-1}"
+        VOICE_LANG: "${VOICE_LANG:-kr}"
+    restart: unless-stopped
+    init: true
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "3000"
+      SP_COMBAT: "client"
+      SP_VERIFY: "off"
+      TRUST_PROXY: "auto"
+      SP_NO_BROWSER: "1"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - type: bind
+        source: "${LOCAL_ASSETS_DIR:?Set LOCAL_ASSETS_DIR in .env}"
+        target: /app/public/assets/local
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${LOCAL_ASSETS_MANIFEST:?Set LOCAL_ASSETS_MANIFEST in .env}"
+        target: /app/data/local-assets.json
+        read_only: true
+        bind:
+          create_host_path: false
+    mem_limit: 4g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    init: true
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - "${TUNNEL_TOKEN:?Set TUNNEL_TOKEN privately in .env}"
+    depends_on:
+      stronghold:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,39 @@
+name: stronghold-ko-dev
+
+services:
+  stronghold:
+    image: "${STRONGHOLD_IMAGE:?Run python3 scripts/project.py configure}"
+    build:
+      context: "${STRONGHOLD_SOURCE_DIR:?Run python3 scripts/project.py configure}"
+      args:
+        FETCH_ASSETS: "${FETCH_ASSETS:-1}"
+        VOICE_LANG: "${VOICE_LANG:-kr}"
+    init: true
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "3000"
+      SP_COMBAT: "client"
+      SP_VERIFY: "off"
+      TRUST_PROXY: "auto"
+      SP_NO_BROWSER: "1"
+    ports:
+      - "127.0.0.1:${DEV_PORT:-3100}:3000"
+    volumes:
+      - type: bind
+        source: "${LOCAL_ASSETS_DIR:?Set LOCAL_ASSETS_DIR in .env}"
+        target: /app/public/assets/local
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${LOCAL_ASSETS_MANIFEST:?Set LOCAL_ASSETS_MANIFEST in .env}"
+        target: /app/data/local-assets.json
+        read_only: true
+        bind:
+          create_host_path: false
+    mem_limit: 4g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

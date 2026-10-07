@@ -1,0 +1,34 @@
+diff --git a/Dockerfile b/Dockerfile
+index 33b45355d6cfa71054075ebb54b6876ea57902d1..0395872bfad3da26d4ab9c45485ae04b010cf0f1 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -5,6 +5,7 @@
+ # only (NOTICE.md), and never part of the repository. Two ways to get it into a container:
+ #   A) download it while building (~250 MB, needs internet during the build):
+ #        docker build -t stronghold-protocol --build-arg FETCH_ASSETS=1 .
++#      Choose a dub with --build-arg VOICE_LANG=kr (cn, jp, en or kr; default cn).
+ #   B) build without it and mount the host's copy (prepared with `node tools/setup.mjs` on the host):
+ #        docker build -t stronghold-protocol .
+ #        docker run -d --name stronghold -p 3000:3000 --restart unless-stopped \
+@@ -27,6 +28,7 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean -
+ # ---- 2. vendor libs + optional art download ---------------------------------------------------------
+ FROM deps AS build
+ ARG FETCH_ASSETS=0
++ARG VOICE_LANG=cn
+ COPY shared ./shared
+ COPY server ./server
+ COPY tools ./tools
+@@ -34,8 +36,12 @@ COPY data ./data
+ COPY public ./public
+ COPY docs/research ./docs/research
+ RUN node tools/vendor.mjs \
++ && case "$VOICE_LANG" in cn|jp|en|kr) ;; *) echo "Unsupported VOICE_LANG: $VOICE_LANG" >&2; exit 1 ;; esac \
+  && if [ "$FETCH_ASSETS" = "1" ]; then \
+-      node tools/fetch-assets.mjs || echo "WARNING: art download incomplete; the image falls back to placeholder art"; \
++      set --; \
++      if [ "$VOICE_LANG" != "cn" ]; then set -- --allow-shrink; fi; \
++      node tools/fetch-assets.mjs "--voice-lang=$VOICE_LANG" "$@" || echo "WARNING: art download incomplete; the image falls back to placeholder art"; \
++      if [ "$VOICE_LANG" != "cn" ]; then node tools/check-voices.mjs "--lang=$VOICE_LANG"; fi; \
+     fi \
+  && rm -rf .cache
+ 

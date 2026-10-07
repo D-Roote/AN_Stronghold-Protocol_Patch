@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/sganggs/Stronghold-Protocol.git",
+  "ref": "v0.2.1",
+  "commit": "c2a2ef778cf728ff29b953b9842b2a39b1e9cbea",
+  "version": "0.2.1",
+  "release": {
+    "url": "https://github.com/sganggs/Stronghold-Protocol/releases/download/v0.2.1/Stronghold-Protocol-v0.2.1.zip",
+    "sha256": "84a4cd861d2631526abec3d19ac3bf17bc5304758f3d73882d4aaa82a33e3f0c"
+  }
+}

@@ -1,0 +1,52 @@
+name: Patch checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: patches-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      SP_E2E: '0'
+      SP_REAL_E2E: '0'
+      RENDER_E2E: '0'
+      NO_COLOR: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test patch and deployment scripts
+        run: python3 -m unittest discover -s tests -v
+      - name: Reconstruct pinned upstream with Korean patches
+        run: python3 scripts/project.py prepare
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: .build/Stronghold-Protocol/package-lock.json
+      - name: Install generated source dependencies
+        working-directory: .build/Stronghold-Protocol
+        run: npm ci --no-audit --no-fund
+      - name: Check Korean interface
+        working-directory: .build/Stronghold-Protocol
+        run: node tools/i18n.mjs check ko --strict
+      - name: Upstream and patch tests
+        working-directory: .build/Stronghold-Protocol
+        run: node --test --test-concurrency=2
+      - name: Lint
+        working-directory: .build/Stronghold-Protocol
+        run: npm run lint
+      - name: Import boundaries
+        working-directory: .build/Stronghold-Protocol
+        run: npm run check:imports
+      - name: Typecheck
+        working-directory: .build/Stronghold-Protocol
+        run: npm run typecheck

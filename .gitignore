@@ -1,0 +1,25 @@
+# Source reconstruction, downloads and private runtime state
+/.build/
+/.cache/
+/service/
+/archive/
+/runtime/
+/node_modules/
+/.env
+/.env.*
+/CODEX_HANDOFF.md
+
+# Environment-owned settings
+/.agents/
+/.codex/
+/.aws/
+/.claude/
+/.vscode/
+/.idea/
+
+# Python and local output
+**/__pycache__/
+*.py[cod]
+*.log
+.DS_Store
+Thumbs.db

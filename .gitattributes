@@ -1,0 +1,2 @@
+# Unified patch context can contain significant whitespace and a final blank line.
+patches/*.patch text eol=lf whitespace=-blank-at-eol,-blank-at-eof
