@@ -7,7 +7,7 @@ import { ERR, EMOTES } from '../shared/constants.js';
 import { normalizeChatText } from '../shared/chat.js';
 import { validateC2S } from '../shared/protocol.js';
 
-describe('team chat: authoritative ephemeral room traffic', () => {
+describe('team chat: authoritative session room traffic', () => {
   let srv;
   let clock;
   const clients = new Set();
@@ -83,6 +83,34 @@ describe('team chat: authoritative ephemeral room traffic', () => {
     await error(solo, { t: 'room.chat', text: 'solo' }, ERR.NOT_IN_ROOM);
   });
 
+  test('faction selection is allow-listed, stored on the seat and announced in shared chat order', async () => {
+    const host = await player('Host'); const r = await room(host);
+    const guest = await player('손님'); await join(guest, r.code);
+    const spectator = await player('Watcher');
+    await ok(spectator, { t: 'room.spectate', code: r.code });
+    await spectator.waitFor('room.state', (state) => state.code === r.code);
+    const outsider = await player('Other'); await room(outsider);
+    assert.equal(validateC2S({ t: 'room.faction', faction: 'kjeragShip' }), null);
+    assert.notEqual(validateC2S({ t: 'room.faction', faction: 'forged' }), null);
+
+    await ok(guest, { t: 'room.faction', faction: 'kjeragShip', playerId: host.id, name: 'FORGED' });
+    const state = await host.waitFor('room.state', (value) => value.seats.some((seat) => seat?.playerId === guest.id && seat.faction === 'kjeragShip'));
+    assert.equal(state.seats.find((seat) => seat?.playerId === guest.id).faction, 'kjeragShip');
+    const selected = await host.waitFor('room.faction');
+    assert.deepEqual(selected, { t: 'room.faction', code: r.code, seq: 1, playerId: guest.id, name: '손님', faction: 'kjeragShip', at: clock });
+    assert.deepEqual(await guest.waitFor('room.faction'), selected);
+    assert.equal(srv.lobby.getRoom(r.code).seatOf(guest.id).faction, 'kjeragShip');
+    await Promise.all([spectator.expectNone('room.faction'), outsider.expectNone('room.faction')]);
+
+    clock += 999;
+    await error(guest, { t: 'room.chat', text: 'too soon after faction' }, ERR.RATE);
+    clock++;
+    await ok(guest, { t: 'room.chat', text: 'shared sequence' });
+    assert.equal((await host.waitFor('room.chat')).seq, 2);
+    await error(spectator, { t: 'room.faction', faction: 'egirShip' }, ERR.SPECTATOR);
+    await error(guest, { t: 'room.faction', faction: 'forged' }, ERR.BAD_MSG);
+  });
+
   test('cooldown follows the session across repeated hello, socket resume and room changes', async () => {
     const host = await player('Host'); const r = await room(host);
     await ok(host, { t: 'room.chat', text: 'first' }); await host.waitFor('room.chat');
@@ -132,6 +160,7 @@ describe('team chat: authoritative ephemeral room traffic', () => {
     assert.equal(live.replay, replay); assert.deepEqual([...replay.pending], pending); assert.deepEqual([...replay.frames], replayFrames);
     assert.equal(srv.registry.byId(host.id).pendingResult, pendingResult);
     assert.ok(!JSON.stringify(replayFrames).includes('room.chat'));
+    assert.ok(!JSON.stringify(replayFrames).includes('room.faction'));
     await host.terminate();
     const resumed = await player('Host', host.token);
     await resumed.waitFor('m.result'); await resumed.expectNone('room.chat');

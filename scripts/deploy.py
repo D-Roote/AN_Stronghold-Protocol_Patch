@@ -29,6 +29,12 @@ _ENV_KEY = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z_0-9]*)\s*=")
 _MANAGED = {"STRONGHOLD_SOURCE_DIR", "STRONGHOLD_IMAGE", "VOICE_LANG",
             "FETCH_ASSETS", "DEV_PORT", "LOCAL_ASSETS_DIR", "LOCAL_ASSETS_MANIFEST"}
 _SNAPSHOT_NAME = re.compile(r"\d{8}T\d{6}\.\d{6}Z")
+COMPOSE_FILES = {"tunnel": "stack.cf-tunnel.yaml", "nginx": "stack.nginx.yaml", "dev": "stack.dev.yaml"}
+GENERATED_FILES = (*COMPOSE_FILES.values(), "nginx.conf")
+LEGACY_COMPOSE_HASHES = {
+    "compose.yaml": "69d8683cab127f33e11ddb7c599b41141c3ad1a04d02de7e939244c0b47295f7",
+    "compose.dev.yaml": "bbcbc2ae3bbf891714aba176edfdd8b25e52da18edebbb9670f1845457d19de7",
+}
 
 
 def _run(args, *, root=None):
@@ -303,8 +309,10 @@ def assets(root, pin, *, archive=None):
             shutil.rmtree(stage)
 
 
-def _compose(service, *, dev=False, env_file=None, compose_file=None):
-    config = compose_file or service / ("compose.dev.yaml" if dev else "compose.yaml")
+def _compose(service, *, dev=False, gateway="tunnel", env_file=None, compose_file=None):
+    if gateway not in {"tunnel", "nginx"} or (dev and gateway != "tunnel"):
+        raise DeploymentError("Choose tunnel or nginx; --dev uses its own local stack")
+    config = compose_file or service / COMPOSE_FILES["dev" if dev else gateway]
     return ["docker", "compose", "--env-file", env_file or service / ".env", "-f", config]
 
 
@@ -325,15 +333,25 @@ def configure(root, pin, source, *, image=None):
     text = _rewrite_env(original, {"STRONGHOLD_SOURCE_DIR": source, "STRONGHOLD_IMAGE": name,
                                  "VOICE_LANG": "kr", "FETCH_ASSETS": "1", "DEV_PORT": "3100",
                                  "LOCAL_ASSETS_DIR": local, "LOCAL_ASSETS_MANIFEST": manifest})
+    # Remove only known generated legacy files, so Compose requires an explicit stack choice.
+    retire = []
+    for filename, digest in LEGACY_COMPOSE_HASHES.items():
+        legacy = service / filename
+        if legacy.exists() or legacy.is_symlink():
+            if legacy.is_symlink() or not legacy.is_file() or _sha(legacy) != digest:
+                raise DeploymentError(f"{filename} has custom changes; rename it explicitly before configure")
+            retire.append(legacy)
     generated = {filename: (templates / filename).read_text(encoding="utf-8")
-                 for filename in ("compose.yaml", "compose.dev.yaml")}
+                 for filename in GENERATED_FILES}
     changed = text != original or any(not (service / filename).is_file() or
                     (service / filename).read_text(encoding="utf-8") != body
-                    for filename, body in generated.items())
+                    for filename, body in generated.items()) or bool(retire)
     if changed:
         _atomic(env_file, text, private=True)
         for filename, body in generated.items():
             _atomic(service / filename, body)
+        for legacy in retire:
+            legacy.unlink()
     env_file.chmod(0o600)
     if not root_env.exists() and not root_env.is_symlink():
         root_env.symlink_to("service/.env")
@@ -416,23 +434,23 @@ def _korean_pack(port):
     return {"lang": "ko", "listed": True, "ui_strings": strings, "game_tables": len(tables)}
 
 
-def up(root, pin=None, source=None, *, dev=False):
+def up(root, pin=None, source=None, *, dev=False, gateway="tunnel"):
     _, service, _ = _paths(root)
-    _run([*_compose(service, dev=dev), "config", "--quiet"])
-    _run([*_compose(service, dev=dev), "up", "-d", "--no-build", "--wait", "--wait-timeout", "90"])
+    _run([*_compose(service, dev=dev, gateway=gateway), "config", "--quiet"])
+    _run([*_compose(service, dev=dev, gateway=gateway), "up", "-d", "--no-build", "--wait", "--wait-timeout", "90"])
     health = _health(3100 if dev else 3000, expected_version=pin["version"] if pin else None)
     return {"running": True, "dev": dev, "version": health.get("app")}
 
 
-def down(root, pin=None, source=None, *, dev=False):
+def down(root, pin=None, source=None, *, dev=False, gateway="tunnel"):
     _, service, _ = _paths(root)
-    _run([*_compose(service, dev=dev), "down"])
+    _run([*_compose(service, dev=dev, gateway=gateway), "down"])
     return {"running": False, "dev": dev}
 
 
-def status(root, pin=None, source=None, *, dev=False):
+def status(root, pin=None, source=None, *, dev=False, gateway="tunnel"):
     _, service, _ = _paths(root)
-    raw = _run([*_compose(service, dev=dev), "ps", "--format", "json"])
+    raw = _run([*_compose(service, dev=dev, gateway=gateway), "ps", "--format", "json"])
     try:
         entries = json.loads(raw) if raw.lstrip().startswith("[") else [json.loads(line) for line in raw.splitlines() if line.strip()]
     except ValueError:
@@ -441,10 +459,10 @@ def status(root, pin=None, source=None, *, dev=False):
                          for item in entries]}
 
 
-def verify(root, pin=None, source=None, *, dev=False):
+def verify(root, pin=None, source=None, *, dev=False, gateway="tunnel"):
     root, service, _ = _paths(root)
     source = Path(source or root / ".build/Stronghold-Protocol").resolve()
-    ids = _run([*_compose(service, dev=dev), "ps", "-q", "stronghold"]).strip().splitlines()
+    ids = _run([*_compose(service, dev=dev, gateway=gateway), "ps", "-q", "stronghold"]).strip().splitlines()
     if len(ids) != 1:
         raise DeploymentError("Exactly one running application container is required for verification")
     language_validation = _korean_pack(3100 if dev else 3000)
@@ -493,8 +511,19 @@ entries:data.count,references:urls.length,missing}));"""
     health = _health(3100 if dev else 3000, attempts=1, expected_version=pin["version"] if pin else None)
     if pin and str(health.get("app", "")).removeprefix("v") != str(pin["version"]).removeprefix("v"):
         raise DeploymentError("Running service version differs from the pinned source version")
-    return {"healthy": True, "version": health.get("app"), "voices": voices, "doctor": "passed",
-            "assets": asset_validation, "korean_pack": language_validation}
+    result = {"healthy": True, "version": health.get("app"), "voices": voices, "doctor": "passed",
+              "assets": asset_validation, "korean_pack": language_validation}
+    if gateway == "nginx":
+        raw = _run([*_compose(service, gateway=gateway), "exec", "-T", "nginx",
+                    "wget", "-q", "-O", "-", "http://127.0.0.1/healthz"])
+        try:
+            proxied = json.loads(raw)
+        except ValueError:
+            raise DeploymentError("nginx proxy health response is invalid") from None
+        if not isinstance(proxied, dict) or proxied.get("ok") is not True or proxied.get("app") != health.get("app"):
+            raise DeploymentError("nginx proxy health response differs from the application")
+        result["gateway"] = {"name": "nginx", "healthy": True}
+    return result
 
 
 def rollback(root, pin=None, source=None, *, backup=None):
@@ -516,7 +545,7 @@ def rollback(root, pin=None, source=None, *, backup=None):
     command = _compose(service, env_file=folder / ".env", compose_file=folder / "compose.yaml")
     _run([*command, "config", "--quiet"])
     _atomic(service / ".env", (folder / ".env").read_text(encoding="utf-8"), private=True)
-    _atomic(service / "compose.yaml", (folder / "compose.yaml").read_text(encoding="utf-8"))
+    _atomic(service / COMPOSE_FILES["tunnel"], (folder / "compose.yaml").read_text(encoding="utf-8"))
     _run([*_compose(service), "up", "-d", "--no-build", "--wait", "--wait-timeout", "90"])
     health = _health(3000)
     (service / ".pending-rollback").unlink(missing_ok=True)
@@ -530,7 +559,8 @@ def setup(root, pin, source, *, archive=None, image=None, start=False):
     configured = configure(root, pin, source, image=image)
     _, service, _ = _paths(root)
     result = {"assets": prepared, "build": built, "configuration": configured,
-              "service_directory": str(service), "compose": str(service / "compose.yaml")}
+              "service_directory": str(service), "compose": str(service / COMPOSE_FILES["tunnel"]),
+              "compose_choices": {key: str(service / filename) for key, filename in COMPOSE_FILES.items()}}
     if start:
         result["service"] = up(root, pin, source)
         result["verification"] = verify(root, pin, source)

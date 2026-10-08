@@ -41,11 +41,15 @@ setup 하나로 원본 다운로드와 pin 검증, 한국어 패치 적용, 로�
 반복 실행하면 패치 변경을 감지해 소스를 다시 준비하며, 기본적으로 서버는 시작하지 않는다.
 
 기존 service/.env의 Tunnel token, 알 수 없는 설정과 주석은 보존한다. 새 환경에서는
-deploy/env.example을 기준으로 .env가 생성되며, 최초 서비스 시작 전에 service/.env의 token을 입력한다.
+deploy/env.example을 기준으로 .env가 생성되며, Cloudflare Tunnel을 선택하면 최초 서비스 시작 전에 service/.env의 token을 입력한다.
+nginx 구성은 token을 사용하지 않는다.
 이미지 이름, 한국어 음성 설정과 경로는 configure가 생성한다. .env 권한은 600이다.
 루트 .env는 service/.env로 연결하여 IDE에서 같은 파일을 사용할 수 있다.
 
-service/compose.yaml은 생성 파일이다. 템플릿 변경은 deploy/compose.yaml에 하고 setup으로 반영한다.
+service/의 stack.*.yaml과 nginx.conf는 생성 파일이다. 템플릿은 deploy/에서 수정하고 setup으로 반영한다.
+기본 이름의 compose.yaml은 생성하지 않으므로 항상 -f로 실행할 구성을 선택한다.
+이전 생성본과 동일한 compose.yaml/compose.dev.yaml은 configure가 제거한다.
+사용자가 수정한 이전 파일은 덮어쓰지 않고 중단하므로 다른 파일명으로 옮긴 뒤 재실행한다.
 빌드 context는 .build/Stronghold-Protocol의 절대 경로이며, 운영 에셋은 읽기 전용으로 마운트한다.
 운영 프로젝트 이름 stronghold, 127.0.0.1:3000 포트와 기존 Named Tunnel 연결을 유지한다.
 로컬 접속은 http://localhost:3000/이다. 최초 접속은 한국어로 시작하며 URL의 ?lang= 값이나
@@ -55,11 +59,11 @@ service/compose.yaml은 생성 파일이다. 템플릿 변경은 deploy/compose.
 
 ~~~bash
 cd service
-docker compose up -d
-docker compose ps
-docker compose logs -f
-docker compose restart
-docker compose down
+docker compose -f stack.cf-tunnel.yaml up -d
+docker compose -f stack.cf-tunnel.yaml ps
+docker compose -f stack.cf-tunnel.yaml logs -f
+docker compose -f stack.cf-tunnel.yaml restart
+docker compose -f stack.cf-tunnel.yaml down
 ~~~
 
 Compose의 build context도 준비한 소스를 가리키며, FETCH_ASSETS=1과 VOICE_LANG=kr을 사용한다.
@@ -67,12 +71,50 @@ Compose의 build context도 준비한 소스를 가리키며, FETCH_ASSETS=1과 
 
 ~~~bash
 # service/ 안에서 준비된 소스를 다시 빌드하고 적용
-docker compose build
-docker compose up -d
+docker compose -f stack.cf-tunnel.yaml build
+docker compose -f stack.cf-tunnel.yaml up -d
 ~~~
 
 restart는 기존 컨테이너를 다시 시작한다. 새 이미지나 환경 설정을 적용할 때는 up -d를 사용한다.
 새 패치를 적용하거나 원본 pin을 갱신할 때는 프로젝트 루트에서 setup을 다시 실행한 뒤 up -d를 실행한다.
+
+## 게이트웨이 선택과 Ubuntu 서버 이전
+
+| 파일 | 실행 구성 | 접속 |
+| --- | --- | --- |
+| stack.cf-tunnel.yaml | 앱 + 기존 Cloudflare Named Tunnel | Tunnel 도메인 또는 localhost:3000 |
+| stack.nginx.yaml | 앱 + nginx 역방향 프록시 | 기본 HTTP 80 |
+| stack.dev.yaml | 별도 개발 앱 | localhost:3100 |
+
+세 파일은 각각 독립된 실행 구성이므로 함께 병합하지 않는다. 운영 두 구성은 동일한 stronghold
+프로젝트와 앱 포트를 사용한다. 전환할 때 현재 게이트웨이를 먼저 종료한다.
+
+~~~bash
+cd service
+# Tunnel을 종료한 뒤 nginx를 선택하는 예
+docker compose -f stack.cf-tunnel.yaml down
+docker compose -f stack.nginx.yaml up -d
+docker compose -f stack.nginx.yaml ps
+python3 ../scripts/project.py verify --gateway nginx
+~~~
+
+nginx는 Docker 내부의 stronghold:3000으로 HTTP와 WebSocket을 전달한다.
+[nginx WebSocket 문서](https://nginx.org/en/docs/http/websocket.html)에 따라 Upgrade 헤더를 전달한다.
+service/.env의 NGINX_BIND_IP(기본 0.0.0.0), NGINX_HTTP_PORT(기본 80)로 공개 주소와 포트를 지정한다.
+nginx.conf는 기본 HTTP 구성이다. 외부 접속의 HTTPS가 필요하면 도메인·인증서와 TLS 설정을 추가한다.
+브라우저 에셋 사전 다운로드 캐시는 HTTPS 또는 localhost에서 사용할 수 있다.
+서버 이전 시 SSH·방화벽·OCI 네트워크의 포트 공개는 해당 서버에서 설정한다.
+
+Ubuntu 2코어/12GB 구성을 고려해 앱의 기존 메모리 제한 4GB를 유지하며,
+nginx는 워커 1개, 메모리 128MB와 CPU 0.25로 제한한다. 모든 구성은 SP_MAX_BOTS=1을 적용한다.
+협동 방마다 추가 AI 팀원은 최대 1명이며 UI에서 추가 버튼을 비활성화하고 서버에서도 초과 요청을 거부한다.
+단순 Node 실행의 기본값은 원본을 유지하므로 직접 실행할 때에도 SP_MAX_BOTS=1을 지정한다.
+이 제한은 방별 제한이므로 여러 방을 동시에 운영할 때의 전체 부하는 별도로 확인한다.
+
+새 서버에는 이 패치 저장소와 비공개 service/.env를 준비한 뒤 setup을 실행하여
+해당 서버 아키텍처의 이미지를 빌드한다. 생성 소스와 service 에셋 경로는 새 환경에서 자동 구성된다.
+기존 PC의 절대 경로를 담은 생성 Compose 파일을 복사하는 대신 새 서버의 deploy 템플릿을 사용한다.
+현재 작업은 이전용 구성을 준비하는 범위이며 실제 Oracle VM 이전은 수행하지 않았다.
 
 ## 추가 한글화와 기타 수정
 
@@ -95,7 +137,7 @@ JSON을 저장한 뒤 다음 명령으로 검사하고 서비스에 반영한다
 python3 scripts/project.py setup
 python3 scripts/project.py check
 cd service
-docker compose up -d
+docker compose -f stack.cf-tunnel.yaml up -d
 python3 ../scripts/project.py verify
 ~~~
 
@@ -112,14 +154,29 @@ prepare는 원본 값이 base 또는 이미 교정된 value와 같을 때만 적
 ~~~bash
 python3 scripts/project.py prepare
 # .build/Stronghold-Protocol 안의 필요한 소스 파일 편집
-python3 scripts/project.py capture --path server/index.js --name 0005-Feat-my-change.patch
+python3 scripts/project.py capture --path server/index.js --name 03-004-Feat-my-change.patch
 python3 scripts/project.py prepare
 ~~~
 
 기존 파일은 차이만 patches에 저장하고, 새 파일은 overlays의 같은 상대 경로에 저장한다.
-소스 패치는 0001-Build-korean-voice.patch처럼 4자리 숫자, Build-/UI-/Feat-/Fix- 등 영어 분류,
-영어 설명으로 이름을 짓는다. 숫자 오름차순으로 적용하며 별도 순서 파일은 사용하지 않는다.
-capture에는 현재 가장 큰 번호에 1을 더한 번호를 지정한다. 새 파일만 overlay로 추가하면
+소스 패치는 01-001-Build-korean-voice.patch처럼 분류 번호 2자리, 분류 내 번호 3자리,
+영어 분류와 설명으로 이름을 짓는다. 분류는 01 Build, 02 UI, 03 Feat, 04 Resource, 05 Fix이다.
+분류 번호 → 분류 내 번호 순서로 적용하며 별도 순서 파일은 사용하지 않는다.
+현재 순서는 관련 기능을 모아 다음과 같이 적용한다.
+
+| 순서 | 패치 | 내용 |
+| --- | --- | --- |
+| 01-001 | Build-korean-voice | KR 음성 빌드 |
+| 02-001 | UI-korean-first-visit | 최초 한국어와 언어 검사 |
+| 02-002 | UI-mobile-orientation-ko | 모바일 회전 안내 |
+| 03-001 | Feat-asset-prefetch | 에셋 사전 다운로드 |
+| 03-002 | Feat-team-chat | 기본 채팅과 접이식 메뉴 |
+| 03-003 | Feat-session-chat-factions | 세션 채팅·진영·전략 선택 UI |
+| 04-001 | Resource-ai-teammate-limit | 방별 추가 AI 제한 |
+
+capture에는 해당 분류의 가장 큰 번호에 1을 더한 번호를 지정한다. 새 분류는 001부터 시작한다.
+앞 분류에 패치를 추가할 때는 전체 패치를 다시 적용해 후속 분류와의 의존성과 결과를 검증한다.
+충돌하면 새 패치를 남기지 않고 생성 소스의 편집 내용을 보존한다. 다른 분류의 번호는 변경하지 않는다. 새 파일만 overlay로 추가하면
 소스 패치가 생성되지 않으므로 번호를 사용하지 않는다. 원본에 반영된 패치를 삭제해 번호가
 비어도 나머지 파일을 다시 번호 매길 필요는 없다. 잘못된 이름과 중복 번호는 적용 전에 오류로 처리한다.
 capture는 지정한 파일만 보존하며, 관계없는 수정이 남아 있으면 prepare가 중단한다.
@@ -140,14 +197,26 @@ API는 이 캐시에 넣지 않는다. 에셋 버전이 바뀌면 이전 캐시�
 브라우저 캐시 기능을 사용할 수 있다.
 
 좌하단에 별도의 다운로드 버튼을 표시하지 않는다. 다운로드 창은 기존 Modal/Button과
-폰트·색상 체계를 사용한다. 모바일 세로 화면의 회전 안내는 0004-UI-mobile-orientation-ko.patch에서
+폰트·색상 체계를 사용한다. 모바일 세로 화면의 회전 안내는 02-002-UI-mobile-orientation-ko.patch에서
 한국어로 교정하며 기존 회전 그래픽과 표시 조건을 사용한다.
 
 협동 게임의 좌하단은 교류·채팅·> 순서다. 교류의 기존 이모티콘 기능을 유지하며,
->를 펼치면 설정·매뉴얼·전체화면 버튼이 세로로 나타난다. 채팅은 같은 방의 실제 팀원에게만
-전달되며 관전자·다른 방·봇은 대상에 포함하지 않는다. 메시지는 200자까지, 전송 간격은 1초이고
-화면에서 10초 후 사라진다. 연결이 끊긴 동안 쓴 메시지는 자동 전송하지 않는다.
-서버·브라우저 저장소·전투 리플레이에 채팅 기록을 보관하지 않는다.
+>를 펼치면 설정·매뉴얼·전체화면 버튼이 오른쪽으로 나타난다. 협동 파티 대기실에서도 좌하단의
+채팅 버튼을 사용할 수 있다. 전략 선택 단계에도 좌하단에 채팅 버튼을 표시하며,
+같은 방의 대기실 → 전략 선택 → 전투에서 기록을 이어서 표시한다. 정보 확인 단계에는
+공간을 확보하기 위해 채팅 버튼을 표시하지 않으며 기록은 계속 유지한다.
+채팅은 같은 방의 실제 팀원에게만 전달되며 관전자·다른 방·봇은 대상에 포함하지 않는다.
+메시지는 200자까지, 전송 간격은 1초다. 열린 채팅은 최근 50건을 페이지 메모리에 보존하고
+스크롤한다. 기록 영역은 데스크톱에서 화면 높이의 절반, 모바일에서는 사용 가능한 세로 공간으로
+제한한다. 닫으면 그 순간의 기록 표시를 고정하고 10초 뒤 숨긴다. 닫힌 동안 받은 메시지도 기록에는
+추가되어 다시 열었을 때 확인할 수 있다. 방을 떠나거나 페이지를 새로 고치면 기록을 지운다.
+연결이 끊긴 동안 쓴 메시지는 자동 전송하지 않는다. 서버·브라우저 영구 저장소·전투 리플레이에
+채팅 기록을 보관하지 않는다.
+
+입력창 오른쪽의 이모티콘·진영 버튼에서 목표 핵심 맹약을 선택한다. 염국·사르곤·빅토리아·
+쉐라그·라테라노·에기르·시라쿠사·카시미어 8종을 지원하며, 선택 알림을 팀 채팅에 표시한다.
+채팅과 대기실 닉네임 옆에 진영 이름과 색상을 표시한다. 진영 변경도 메시지 전송과 같은 1초
+제한을 적용한다. 상세 이모티콘 선택은 추후 추가한다.
 
 추가 기능 설계와 작업 기록은 .cache/feature-work/에 작성하며 Git에서 제외한다.
 
@@ -166,10 +235,10 @@ CI도 원본을 지정한 커밋으로 재구성하고 위 검사를 수행한�
 
 ~~~bash
 cd service
-docker compose -f compose.dev.yaml up -d
+docker compose -f stack.dev.yaml up -d
 python3 ../scripts/project.py verify --dev
-docker compose -f compose.dev.yaml ps
-docker compose -f compose.dev.yaml down
+docker compose -f stack.dev.yaml ps
+docker compose -f stack.dev.yaml down
 ~~~
 
 개발 서버는 별도 프로젝트와 127.0.0.1:3100 포트를 사용한다.
@@ -200,7 +269,7 @@ ZIP SHA256, 경로, manifest 항목 수와 모든 참조 파일을 확인한 뒤
 원본 0.1.3에서 0.2.1로는 소환물 39개·파일 117개가 추가되며, manifest는 1481에서 1598개가 된다.
 한국어 음성은 별도의 KR 빌드를 사용하며, CN Full Release의 음성을 복사하지 않는다.
 
-검증한 lock·패치·스크립트를 main에 합쳐 push한 다음 service/에서 docker compose up -d로 운영에 적용한다.
+검증한 lock·패치·스크립트를 main에 합쳐 push한 다음 service/에서 docker compose -f stack.cf-tunnel.yaml up -d로 운영에 적용한다.
 반영 후 보조 검사 python3 ../scripts/project.py verify를 사용할 수 있다.
 원본 tag 이름은 lock에 기록하며, 이 자체 저장소에는 원본 tag를 가져올 필요가 없다.
 자체 릴리스에는 ko/v0.2.1-r1 같은 이름을 사용할 수 있다.
@@ -209,9 +278,9 @@ ZIP SHA256, 경로, manifest 항목 수와 모든 참조 파일을 확인한 뒤
 
 ~~~bash
 cd service
-docker compose ps
-docker compose down
-docker compose up -d
+docker compose -f stack.cf-tunnel.yaml ps
+docker compose -f stack.cf-tunnel.yaml down
+docker compose -f stack.cf-tunnel.yaml up -d
 ~~~
 
 기본 configure/build/up은 복구 이미지나 설정 백업을 생성하지 않는다.

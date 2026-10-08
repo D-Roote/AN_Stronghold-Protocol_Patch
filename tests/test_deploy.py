@@ -30,7 +30,7 @@ class DeploymentTests(unittest.TestCase):
         self.service.mkdir()
         templates = self.root / "deploy"
         templates.mkdir()
-        for name in ("compose.yaml", "compose.dev.yaml"):
+        for name in deploy.GENERATED_FILES:
             (templates / name).write_text('name: stronghold\nservices:\n  stronghold:\n    image: "${STRONGHOLD_IMAGE}"\n')
         (templates / "env.example").write_text("TUNNEL_TOKEN=\n")
         self.manifest = {"count": 1, "groups": {"model": {"item": {"path": "/assets/local/model/item.png"}}}}
@@ -83,7 +83,7 @@ class DeploymentTests(unittest.TestCase):
 
     def existing_runtime(self):
         (self.service / ".env").write_text("TUNNEL_TOKEN=private-token\nSTRONGHOLD_IMAGE=original:tag\n")
-        (self.service / "compose.yaml").write_text("name: stronghold\nservices: {}\n")
+        (self.service / "stack.cf-tunnel.yaml").write_text("name: stronghold\nservices: {}\n")
 
     def test_configure_preserves_private_values_without_backup_or_docker(self):
         self.existing_assets()
@@ -114,6 +114,41 @@ class DeploymentTests(unittest.TestCase):
         self.assertFalse(second["configured"])
         self.assertFalse((self.service / "rollback").exists())
 
+    def test_known_generated_legacy_compose_files_are_retired(self):
+        self.existing_assets()
+        self.existing_runtime()
+        bodies = {"compose.yaml": "original tunnel template", "compose.dev.yaml": "original dev template"}
+        hashes = {name: hashlib.sha256(body.encode()).hexdigest() for name, body in bodies.items()}
+        for name, body in bodies.items():
+            (self.service / name).write_text(body)
+        with patch.object(deploy, "LEGACY_COMPOSE_HASHES", hashes):
+            deploy.configure(self.root, self.pin, self.source)
+        self.assertTrue(all(not (self.service / name).exists() for name in bodies))
+        self.assertTrue(all((self.service / name).is_file() for name in deploy.GENERATED_FILES))
+        self.assertIn("TUNNEL_TOKEN=private-token", (self.service / ".env").read_text())
+
+    def test_custom_legacy_compose_is_preserved_before_any_configuration_write(self):
+        self.existing_assets()
+        self.existing_runtime()
+        legacy = self.service / "compose.yaml"
+        legacy.write_text("custom deployment settings\n")
+        original_env = (self.service / ".env").read_bytes()
+        with self.assertRaisesRegex(deploy.DeploymentError, "custom changes"):
+            deploy.configure(self.root, self.pin, self.source)
+        self.assertEqual(legacy.read_text(), "custom deployment settings\n")
+        self.assertEqual((self.service / ".env").read_bytes(), original_env)
+        self.assertFalse((self.service / "stack.nginx.yaml").exists())
+
+    def test_nginx_selection_and_development_selection_are_explicit(self):
+        self.assertIn(self.service / "stack.nginx.yaml", deploy._compose(self.service, gateway="nginx"))
+        self.assertIn(self.service / "stack.dev.yaml", deploy._compose(self.service, dev=True))
+        for options in ({"gateway": "unknown"}, {"gateway": "nginx", "dev": True}):
+            with self.subTest(options=options), self.assertRaises(deploy.DeploymentError):
+                deploy._compose(self.service, **options)
+        with patch.object(deploy, "_run", return_value="") as run, patch.object(deploy, "_health", return_value={"app": "0.2.1"}):
+            deploy.up(self.root, self.pin, self.source, gateway="nginx")
+        self.assertTrue(all((self.service / "stack.nginx.yaml") in call.args[0] for call in run.call_args_list))
+
     def test_build_only_builds_requested_image_without_old_image_lookup(self):
         self.existing_runtime()
         with patch.object(deploy, "_run", return_value="") as run:
@@ -135,7 +170,7 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(result["build"]["image"], result["configuration"]["image"])
         self.assertEqual(Path(result["service_directory"]), self.service)
         self.assertTrue(Path(result["compose"]).is_file())
-        self.assertTrue((self.service / "compose.dev.yaml").is_file())
+        self.assertTrue((self.service / "stack.dev.yaml").is_file())
         env = (self.service / ".env").read_text()
         self.assertIn("TUNNEL_TOKEN=private-token", env)
         self.assertIn(f"STRONGHOLD_SOURCE_DIR='{self.source}'", env)
@@ -148,7 +183,7 @@ class DeploymentTests(unittest.TestCase):
     def test_generated_service_is_directly_usable_by_docker_compose(self):
         self.existing_runtime()
         actual_templates = Path(__file__).resolve().parents[1] / "deploy"
-        for filename in ("compose.yaml", "compose.dev.yaml"):
+        for filename in deploy.GENERATED_FILES:
             (self.root / "deploy" / filename).write_text((actual_templates / filename).read_text())
         archive = self.release()
         with patch.object(deploy, "_run", return_value=""):
@@ -158,8 +193,9 @@ class DeploymentTests(unittest.TestCase):
         available = deploy.subprocess.run(["docker", "compose", "version"], capture_output=True, env=environment)
         if available.returncode:
             self.skipTest("Docker Compose plugin is unavailable")
-        for filename, project, port in (("compose.yaml", "stronghold", 3000),
-                                         ("compose.dev.yaml", "stronghold-ko-dev", 3100)):
+        for filename, project, port in (("stack.cf-tunnel.yaml", "stronghold", 3000),
+                                         ("stack.dev.yaml", "stronghold-ko-dev", 3100),
+                                         ("stack.nginx.yaml", "stronghold", 3000)):
             parsed = deploy.subprocess.run(["docker", "compose", "-f", filename, "config", "--format", "json"],
                                            cwd=self.service, env=environment, capture_output=True, text=True)
             self.assertEqual(parsed.returncode, 0)
@@ -172,6 +208,16 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(app["ports"][0]["host_ip"], "127.0.0.1")
             self.assertEqual(int(app["ports"][0]["published"]), port)
             self.assertTrue(all(mount["read_only"] for mount in app["volumes"]))
+            self.assertEqual(app["environment"]["SP_MAX_BOTS"], "1")
+            if filename == "stack.nginx.yaml":
+                self.assertNotIn("cloudflared", config["services"])
+                self.assertEqual(int(config["services"]["nginx"]["ports"][0]["published"]), 80)
+                # The nginx choice must also parse without any Tunnel token.
+                env_path = self.service / ".env"
+                env_path.write_text(env_path.read_text().replace("TUNNEL_TOKEN=private-token\n", ""))
+                again = deploy.subprocess.run(["docker", "compose", "-f", filename, "config", "--quiet"],
+                                              cwd=self.service, env=environment, capture_output=True)
+                self.assertEqual(again.returncode, 0)
 
     def test_failed_build_preserves_private_configuration_without_creating_backup(self):
         self.existing_runtime()
@@ -212,6 +258,25 @@ class DeploymentTests(unittest.TestCase):
         health.assert_not_called()
         self.assertEqual((self.service / ".env").read_bytes(), original)
         self.assertFalse((self.service / "rollback").exists())
+
+    def test_verify_checks_nginx_proxy_in_addition_to_the_app(self):
+        health = {"ok": True, "app": "0.2.1"}
+        with patch.object(deploy, "_run", side_effect=["container-id", "image-id", "KR voices", "", json.dumps(health)]) as run, \
+                patch.object(deploy, "_korean_pack", return_value={"lang": "ko"}), \
+                patch.object(deploy, "_health", return_value=health):
+            result = deploy.verify(self.root, source=self.source, gateway="nginx")
+        self.assertEqual(result["gateway"], {"name": "nginx", "healthy": True})
+        self.assertEqual(run.call_args.args[0], [*deploy._compose(self.service, gateway="nginx"), "exec", "-T", "nginx",
+                                               "wget", "-q", "-O", "-", "http://127.0.0.1/healthz"])
+
+    def test_verify_rejects_invalid_or_mismatched_nginx_health(self):
+        for response in ("<html>error</html>", "[]", '{"ok":false,"app":"0.2.1"}', '{"ok":true,"app":"0.1.3"}'):
+            with self.subTest(response=response), \
+                    patch.object(deploy, "_run", side_effect=["container-id", "image-id", "KR voices", "", response]), \
+                    patch.object(deploy, "_korean_pack", return_value={"lang": "ko"}), \
+                    patch.object(deploy, "_health", return_value={"ok": True, "app": "0.2.1"}):
+                with self.assertRaises(deploy.DeploymentError):
+                    deploy.verify(self.root, source=self.source, gateway="nginx")
 
     def test_up_rejects_wrong_app_version_without_creating_backup(self):
         self.existing_runtime()
@@ -454,7 +519,7 @@ class DeploymentTests(unittest.TestCase):
             [*deploy._compose(self.service, env_file=backup / ".env", compose_file=backup / "compose.yaml"), "config", "--quiet"],
             [*deploy._compose(self.service), "up", "-d", "--no-build", "--wait", "--wait-timeout", "90"]])
         self.assertEqual((self.service / ".env").read_text(), private)
-        self.assertEqual((self.service / "compose.yaml").read_text(), compose)
+        self.assertEqual((self.service / "stack.cf-tunnel.yaml").read_text(), compose)
         self.assertEqual(stat.S_IMODE((self.service / ".env").stat().st_mode), 0o600)
         self.assertEqual(len(list((self.service / "rollback").iterdir())), 1)
         self.assertEqual((backup / ".env").read_text(), private)

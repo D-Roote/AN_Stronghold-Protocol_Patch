@@ -13,15 +13,16 @@
 | 저장소 파일 | 역할 |
 | --- | --- |
 | [patches/ko-ui.json](patches/ko-ui.json) | 원본 UI의 한국어 문구 교정 164개와 충돌 검사 |
-| [patches/ko-features.json](patches/ko-features.json) | 자체 추가 기능의 한국어 문구 41개와 충돌 검사 |
-| patches/0001-Build-*.patch 등 | 숫자 순서와 Build-/UI-/Feat- 분류를 가진 소스 수정 |
+| [patches/ko-features.json](patches/ko-features.json) | 자체 추가 기능의 한국어 문구와 충돌 검사 |
+| patches/01-001-Build-*.patch 등 | 숫자 순서와 Build-/UI-/Feat-/Resource- 분류를 가진 소스 수정 |
 | overlays/ | 원본에 추가할 자체 기능, 음성 검사기와 테스트 |
 | deploy/ | 운영·개발 설정 템플릿 및 검사 이미지 |
 | [scripts/project.py](scripts/project.py) | 원본 준비, 업데이트, 패치 추출과 구성 CLI |
 | [scripts/deploy.py](scripts/deploy.py) | 에셋 추출, 최종 이미지 빌드와 Compose 구성 |
 | tests/ | 자체 구성 스크립트의 테스트 |
 
-전투 로직·밸런스는 유지하며 기본 한국어, 에셋 사전 다운로드, 팀 텍스트 채팅과 접이식 메뉴를 추가합니다.
+기본 한국어, 에셋 사전 다운로드, 팀 텍스트 채팅과 접이식 메뉴를 추가합니다.
+서비스의 추가 AI 팀원은 방마다 최대 1명으로 제한합니다.
 일부 UI 기계번역은 아직 남아 있습니다.
 한국어 음성은 공개 KR 덤프를 사용하며, 해당 음성이 없는 오퍼레이터는 무음입니다.
 
@@ -34,24 +35,36 @@ python3 scripts/project.py setup
 
 # 이후 서비스는 Docker Compose로 관리
 cd service
-docker compose up -d
-docker compose ps
+docker compose -f stack.cf-tunnel.yaml up -d
+docker compose -f stack.cf-tunnel.yaml ps
 ~~~
 
-별도로 prepare를 먼저 실행할 필요가 없습니다. 처음 설치하면 시작 전에 service/.env에
-Tunnel token을 입력합니다. 기존 비밀값은 보존하며 .env 권한은 600으로 유지합니다.
+세 구성 중 하나를 `-f`로 선택합니다. 기본 이름의 Compose 파일은 생성하지 않습니다.
+
+| 파일 | 용도 |
+| --- | --- |
+| `service/stack.cf-tunnel.yaml` | 기존 Cloudflare Tunnel, 앱은 localhost:3000 |
+| `service/stack.nginx.yaml` | nginx 역방향 프록시, 기본 HTTP 80 |
+| `service/stack.dev.yaml` | 별도 개발 서버, localhost:3100 |
+
+nginx를 선택하면 위 명령의 파일명을 `stack.nginx.yaml`로 바꿉니다.
+게이트웨이를 전환할 때는 기존 구성으로 `down`한 뒤 새 구성으로 `up -d`합니다.
+
+별도로 prepare를 먼저 실행할 필요가 없습니다. Cloudflare Tunnel을 사용하면
+시작 전에 service/.env에 Tunnel token을 입력합니다. nginx 구성에는 token이 필요하지 않습니다.
+기존 비밀값은 보존하며 .env 권한은 600으로 유지합니다.
 실제 운영 폴더, 원본 캐시와 생성 소스는 Git에서 제외합니다.
 
 ~~~bash
 # service/ 안에서 실행
-docker compose logs -f
-docker compose restart
-docker compose down
+docker compose -f stack.cf-tunnel.yaml logs -f
+docker compose -f stack.cf-tunnel.yaml restart
+docker compose -f stack.cf-tunnel.yaml down
 ~~~
 
 패치나 원본 버전을 변경하면 프로젝트 루트에서 setup을 다시 실행합니다. 변경한 패치를 자동으로
-재적용하고 새 이미지를 빌드하므로, 이후 service/에서 docker compose up -d로 반영합니다.
-docker compose build도 준비된 소스로 KR 이미지를 다시 빌드할 수 있습니다.
+재적용하고 새 이미지를 빌드하므로, 이후 service/에서 docker compose -f stack.cf-tunnel.yaml up -d로 반영합니다.
+docker compose -f stack.cf-tunnel.yaml build도 준비된 소스로 KR 이미지를 다시 빌드할 수 있습니다.
 보조 검사는 python3 scripts/project.py check / verify로 실행할 수 있습니다.
 
 기본 배포는 복구본을 자동 생성하지 않습니다. 필요하면 서버를 중단하거나 재생성하여 적용합니다.

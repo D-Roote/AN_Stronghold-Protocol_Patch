@@ -1,0 +1,208 @@
+diff --git a/public/i18n/en.json b/public/i18n/en.json
+index 65d196ce51a1cc27e5225e0b0911b0bf6f966abd..6d91db392aad4101053b06cad3189f1cb782fd06 100644
+--- a/public/i18n/en.json
++++ b/public/i18n/en.json
+@@ -1096,5 +1096,19 @@
+   "收起游戏工具": "Collapse game menu",
+   "展开游戏工具": "Expand game menu",
+   "发送": "Send",
+-  "发送中…": "Sending…"
++  "发送中…": "Sending…",
++  "请选择有效阵营": "Choose a valid faction",
++  "炎": "Yan",
++  "萨尔贡": "Sargon",
++  "维多利亚": "Victoria",
++  "谢拉格": "Kjerag",
++  "拉特兰": "Laterano",
++  "阿戈尔": "Aegir",
++  "叙拉古": "Siracusa",
++  "卡西米尔": "Kazimierz",
++  "{name}博士选择了{faction}阵营": "{name} chose the {faction} faction.",
++  "表情与阵营": "Emotes and factions",
++  "选择阵营": "Choose a faction",
++  "表情功能稍后提供": "Emotes will be added later",
++  "关闭聊天后，消息将在10秒后隐藏": "Messages fade 10 seconds after closing chat"
+ }
+diff --git a/public/js/screens/room.js b/public/js/screens/room.js
+index 26fe4a2a78005f29c675c5e8f0ee4fecf10e278c..3264d36a9362610e7eeb65b030b4418addae0762 100644
+--- a/public/js/screens/room.js
++++ b/public/js/screens/room.js
+@@ -19,8 +19,10 @@ import {
+ import { toast, toastError } from '../ui/toasts.js';
+ import { copyText } from '../ui/clipboard.js';
+ import { GuideButton } from '../ui/guide.js';
++import { TeamChat, FactionTag } from '../ui/teamChat.js';
+ import { LoadoutButton } from './loadout.js';
+ import { net } from '../net.js';
++import { canTeamChat } from '../chat.js';
+ import { store, useStore, shallowEqual, emptyMatch, isSpectating } from '../store.js';
+ import { difficultyInfo } from './lobby.js';
+ import { t, tc } from '../../../shared/i18n.js';
+@@ -121,6 +123,7 @@ function SeatCard({ seat, index, room, facts, myId, busy, onAddBot, onRemoveBot,
+     </div>
+     <div class="seat__who">
+       <span class="seat__name">${seat.name || t('博士')}</span>
++      ${seat.isBot ? null : html`<${FactionTag} faction=${seat.faction} />`}
+       ${isMe ? html`<span class="seat__you">${t('你')}</span>` : null}
+     </div>
+     <${MicroLabel}>${seat.isBot ? 'AUTONOMOUS UNIT' : `DOCTOR #${doctorNo(seat.playerId)}`}<//>
+@@ -195,9 +198,12 @@ export function RoomScreen() {
+   const me = useStore((s) => s.me, shallowEqual);
+   const conn = useStore((s) => s.connection, shallowEqual);
+   const [busy, setBusy] = useState(null);
++  const [chatOpen, setChatOpen] = useState(false);
+   const alive = useRef(true);
+   const inFlight = useRef(false); // synchronous guard against double clicks (state updates are async)
+   useEffect(() => () => { alive.current = false; }, []);
++  const chatAvailable = canTeamChat(room, me.playerId);
++  useEffect(() => { if (!chatAvailable) setChatOpen(false); }, [chatAvailable]);
+ 
+   if (!room) return null;
+   const online = conn.status === 'online';
+@@ -304,6 +310,9 @@ export function RoomScreen() {
+     </main>
+     <${SpectatorBar} facts=${facts} myId=${me.playerId} busy=${busy} onRemove=${removeSpectator} onSit=${sit} />
+ 
++    ${chatAvailable ? html`<div class="room-chat"><${TeamChat} key=${room.code} playerId=${me.playerId}
++      online=${online} open=${chatOpen} onToggle=${setChatOpen} /></div>` : null}
++
+     <footer class="room-bar">
+       <div class="room-bar__left">
+         <span class="room-bar__label">${t('模拟难度')}<${MicroLabel}>DIFFICULTY<//></span>
+diff --git a/server/lobby.js b/server/lobby.js
+index 3d9255c62dcc6beaaca063eb1fc45acc0ea8d024..249f38a271cc3ba66f618a466797d900dc5c3bf9 100644
+--- a/server/lobby.js
++++ b/server/lobby.js
+@@ -101,7 +101,7 @@ import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
+ import { getData as defaultGetData, lookup } from './data.js';
+ import { Match as DefaultMatch } from './match/Match.js';
+ import { KITTED_CHARS } from './sim/content/kits/index.js';
+-import { CHAT_COOLDOWN_MS, normalizeChatText } from '../shared/chat.js';
++import { CHAT_COOLDOWN_MS, normalizeChatText, normalizeChatFaction } from '../shared/chat.js';
+ 
+ /** Room code alphabet: uppercase letters without I and O (and no digits, so no 0/1). */
+ export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+@@ -129,7 +129,8 @@ const noopLog = { info() {}, warn() {}, error() {}, debug() {} };
+ /**
+  * @typedef {{ seat: number, playerId: string, name: string, isBot: boolean, ready: boolean,
+  *             connected: boolean, left: boolean, loadout?: Record<string, { skill: number, module: string|null }> | null,
+- *             notOwned?: readonly string[] | null, diy?: Readonly<Record<string, DiyLoadout>> | null }} Seat
++ *             notOwned?: readonly string[] | null, diy?: Readonly<Record<string, DiyLoadout>> | null,
++ *             faction?: string | null }} Seat
+  * @typedef {{ charId: string, skillIndex: number, uniEquipId: string|null }} DiyLoadout
+  */
+ 
+@@ -206,7 +207,8 @@ export class Room {
+       difficulty: this.difficulty,
+       inMatch: !!this.match,
+       seats: this.seats.map((s) => (s
+-        ? { seat: s.seat, playerId: s.playerId, name: s.name, isBot: s.isBot, ready: s.ready, connected: s.connected && !s.left }
++        ? { seat: s.seat, playerId: s.playerId, name: s.name, isBot: s.isBot, ready: s.ready, connected: s.connected && !s.left,
++          ...(s.faction ? { faction: s.faction } : {}) }
+         : null)),
+       spectators: this.spectators.map((s) => ({ playerId: s.playerId, name: s.name, connected: s.connected })),
+     };
+@@ -312,6 +314,7 @@ export class Lobby {
+       case 'room.join': return this.join(session, msg);
+       case 'room.leave': return this.leave(session);
+       case 'room.chat': return this.chat(session, msg);
++      case 'room.faction': return this.faction(session, msg);
+       case 'room.ready': return this.ready(session, msg);
+       case 'room.setDifficulty': return this.setDifficulty(session, msg);
+       case 'room.addBot': return this.addBot(session);
+@@ -393,6 +396,31 @@ export class Lobby {
+     return OK;
+   }
+ 
++  /** Select a core alliance marker and announce it on the same ordered, transient team channel. */
++  faction(session, msg) {
++    const room = this.roomOf(session);
++    if (!room || room.disposed) return fail(ERR.NOT_IN_ROOM);
++    const seat = room.seatOf(session.playerId);
++    if (!seat) return fail(ERR.SPECTATOR);
++    if (room.mode !== 'coop' || seat.isBot || seat.left || !seat.connected || !session.connected) return fail(ERR.NOT_IN_ROOM);
++    const faction = normalizeChatFaction(msg.faction);
++    if (faction === null) return fail(ERR.BAD_MSG);
++    if (seat.faction === faction) return OK;
++    const now = this.now();
++    if (now - session.lastChatAt < CHAT_COOLDOWN_MS) return fail(ERR.RATE);
++    session.lastChatAt = now;
++    seat.faction = faction;
++    this.broadcastState(room);
++    const frame = encode({ t: 'room.faction', code: room.code, seq: ++room.chatSeq,
++      playerId: seat.playerId, name: seat.name, faction, at: now });
++    for (const teammate of room.activeHumans()) {
++      if (!teammate.connected) continue;
++      const peer = this.registry.byId(teammate.playerId);
++      if (peer?.connected && peer.roomCode === room.code) sendRaw(peer.ws, frame);
++    }
++    return OK;
++  }
++
+   create(session, { mode, difficulty }) {
+     const cur = this.roomOf(session);
+     if (cur && cur.match) return fail(ERR.ROOM_STARTED, 'leave your running match first');
+diff --git a/shared/protocol.js b/shared/protocol.js
+index 53a1d290d3fd6abca48ab50a6d8b64b2684c388b..5fd2a3ab2a7adbeaa70403c22edea2c44ed70762 100644
+--- a/shared/protocol.js
++++ b/shared/protocol.js
+@@ -4,7 +4,7 @@
+ import { DIFFICULTIES, NAME_MAX_LEN, ROOM_CODE_LEN, MAX_SEATS, EMOTES, GEO } from './constants.js';
+ import { isDroppableChess } from './standIn.js';
+ import { diySlotIds, validateDiyPicks } from './diy.js';
+-import { normalizeChatText } from './chat.js';
++import { normalizeChatText, normalizeChatFaction } from './chat.js';
+ 
+ // ---- tiny validators -------------------------------------------------------
+ const isInt = (v, lo = -Infinity, hi = Infinity) => Number.isInteger(v) && v >= lo && v <= hi;
+@@ -325,6 +325,7 @@ export const C2S = {
+   'room.join': { code: (v) => isStr(v, ROOM_CODE_LEN + 2) && /^[A-Za-z0-9]+$/.test(v) },
+   'room.leave': {},
+   'room.chat': { text: (v) => normalizeChatText(v) !== null },
++  'room.faction': { faction: (v) => normalizeChatFaction(v) !== null },
+   'room.ready': { ready: isBool },
+   'room.setDifficulty': { difficulty: (v) => DIFFICULTIES.includes(v) },
+   'room.addBot': {},
+@@ -398,7 +399,7 @@ export const C2S = {
+ // Server → client message types (documentation + client dispatch table keys).
+ export const S2C = [
+   'welcome', 'ok', 'error', 'pong',
+-  'room.state', 'room.closed', 'room.chat',
++  'room.state', 'room.closed', 'room.chat', 'room.faction',
+   'm.public', 'm.private', 'm.field', 'm.toast', 'm.ticker', 'm.emote', 'm.result',
+   // m.unitStats { seq, round, units: [unitStatsEntry] } — the answer to g.unitStats (the requester only)
+   'm.unitStats',
+diff --git a/public/js/screens/bandDraft.js b/public/js/screens/bandDraft.js
+index 46d9e791638486232e5825be7df13e857d89af08..93ef0556c17d12c299cc388ef4253a3a15e4d384 100644
+--- a/public/js/screens/bandDraft.js
++++ b/public/js/screens/bandDraft.js
+@@ -26,6 +26,8 @@ import { MatchInfoDialog, matchInfoModel } from '../ui/matchInfo.js';
+ import { actions, act } from '../ui/gameActions.js';
+ import { normalizeDraft, sortedPlayers } from '../ui/gameLogic.js';
+ import { useStore } from '../store.js';
++import { TeamChat } from '../ui/teamChat.js';
++import { canTeamChat } from '../chat.js';
+ import { data } from '../data.js';
+ import { audio } from '../audio.js';
+ import { modeOffBonds, bandOffBonds, bandOffLine } from '../ui/gameLogic.js';
+@@ -168,6 +170,11 @@ export function BandDraftScreen() {
+   const pub = useStore((s) => s.match.public);
+   const priv = useStore((s) => s.match.private);
+   const myId = useStore((s) => s.me.playerId);
++  const room = useStore((s) => s.room);
++  const conn = useStore((s) => s.connection);
++  const [chatOpen, setChatOpen] = useState(false);
++  const chatAvailable = canTeamChat(room, myId);
++  useEffect(() => { if (!chatAvailable) setChatOpen(false); }, [chatAvailable]);
+   const roomSolo = useStore((s) => s.room?.mode === 'solo');
+   const gd = useGameData();
+   const [sel, setSel] = useState(null);
+@@ -324,6 +331,8 @@ export function BandDraftScreen() {
+         </div>
+       </aside>
+     </main>
++    ${chatAvailable ? html`<div class="phase-chat phase-chat--draft"><${TeamChat} key=${room.code} playerId=${myId}
++      online=${conn.status === 'online'} open=${chatOpen} onToggle=${setChatOpen} /></div>` : null}
+     <${ExitModal} open=${exit} onClose=${() => setExit(false)} solo=${solo} />
+     <${MatchInfoDialog} open=${infoOpen} onClose=${() => setInfoOpen(false)} model=${info}
+       status=${infoStatus ? html`<span class=${cx('minfo-dlg__turn', `is-${infoStatus.tone}`)}>

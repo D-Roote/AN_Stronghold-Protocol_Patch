@@ -1,8 +1,34 @@
 // Team text chat is transient room traffic, separate from matches, emotes and replays.
 export const CHAT_MAX_LENGTH = 200;
 export const CHAT_COOLDOWN_MS = 1000;
-export const CHAT_TTL_MS = 10_000;
+export const CHAT_CLOSED_PREVIEW_MS = 10_000;
 export const CHAT_HISTORY_LIMIT = 50;
+
+/** Core alliances available as a session-local player marker. Colors are UI constants, never client input. */
+export const CHAT_FACTIONS = Object.freeze([
+  Object.freeze({ id: 'yanShip', color: '#ef6a52' }),
+  Object.freeze({ id: 'sargonShip', color: '#d6a84f' }),
+  Object.freeze({ id: 'victoriaShip', color: '#b99ae8' }),
+  Object.freeze({ id: 'kjeragShip', color: '#8fdcf4' }),
+  Object.freeze({ id: 'lateranoShip', color: '#f0ca69' }),
+  Object.freeze({ id: 'egirShip', color: '#4f9ee8' }),
+  Object.freeze({ id: 'siracusaShip', color: '#7bc7a4' }),
+  Object.freeze({ id: 'kazimierzShip', color: '#f39a3d' }),
+]);
+
+/** @type {Map<string, { id: string, color: string }>} */
+const CHAT_FACTION_BY_ID = new Map(CHAT_FACTIONS.map((faction) => [faction.id, faction]));
+
+/** Return the canonical allow-listed faction id, or null for untrusted/unknown input. */
+export function normalizeChatFaction(value) {
+  return typeof value === 'string' && CHAT_FACTION_BY_ID.has(value) ? value : null;
+}
+
+/** Read-only display metadata for a validated faction id. */
+export function chatFaction(value) {
+  const id = normalizeChatFaction(value);
+  return id ? CHAT_FACTION_BY_ID.get(id) || null : null;
+}
 
 /** One bounded line of plain text. Null means empty, too long or malformed Unicode. */
 export function normalizeChatText(value) {

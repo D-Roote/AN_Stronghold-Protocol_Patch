@@ -1,0 +1,90 @@
+diff --git a/public/js/ui/lang.js b/public/js/ui/lang.js
+index 5f95bfbfdc20c924e1116e89477da476393abd36..1df36f868ac5bacfc4f22110f3d89040ac5a4a39 100644
+--- a/public/js/ui/lang.js
++++ b/public/js/ui/lang.js
+@@ -118,7 +118,7 @@ export async function loadLangChain(lang, doFetch = defaultFetch) {
+ export const dataChain = (lang) => langChain(lang).filter((c) => langInfo(c)?.data !== false).map((c) => ({ code: c, url: langInfo(c)?.dataUrl }));
+ 
+ /**
+- * The language to start in: the URL's `?lang=`, then the stored choice, then Chinese. `tentative`: also a well-formed
++ * The language to start in: the URL's `?lang=`, then the stored choice, then Korean. `tentative`: also a well-formed
+  * code no pack is known for (boot without an index tries to load it).
+  * @param {string} [search] location.search
+  * @param {(key: string, fallback: any) => any} [load]
+@@ -132,7 +132,7 @@ export function initialLang(search = globalThis.location?.search || '', load = l
+   if (fromUrl) return { lang: fromUrl, fromUrl: true };
+   let stored = null;
+   try { stored = pick(load(PREF_KEY, null)); } catch { /* ignore */ }
+-  return { lang: stored || DEFAULT_LANG, fromUrl: false };
++  return { lang: stored || 'ko', fromUrl: false };
+ }
+ 
+ function stripLangParam() {
+diff --git a/test/i18n-packs.test.js b/test/i18n-packs.test.js
+index 9b8182e8ca182284b057ebff75b1c424edafd436..088a6848a8d846f8ec3b052bf233768f099a0d02 100644
+--- a/test/i18n-packs.test.js
++++ b/test/i18n-packs.test.js
+@@ -385,7 +385,10 @@ test('client: the index registers the language packs; the menu lists them (butto
+   setLang('zh');
+   assert.deepEqual([fmtNum(150_000), fmtNum(2.5e8)], ['15.0万', '2.5亿'], 'Chinese as before');
+   assert.deepEqual(lang.initialLang('?lang=QAB', () => null), { lang: 'qab', fromUrl: true });
+-  assert.deepEqual(lang.initialLang('', () => 'qzz'), { lang: 'zh', fromUrl: false }, 'a stored pack that is gone: Chinese');
++  assert.deepEqual(lang.initialLang('', () => 'qzz'), { lang: 'ko', fromUrl: false }, 'a stored pack that is gone: Korean');
++  assert.deepEqual(lang.initialLang('', () => null), { lang: 'ko', fromUrl: false }, 'first visit: Korean');
++  assert.deepEqual(lang.initialLang('', () => 'en'), { lang: 'en', fromUrl: false }, 'preserve a stored choice');
++  assert.deepEqual(lang.initialLang('?lang=zh', () => 'en'), { lang: 'zh', fromUrl: true }, 'explicit URL wins');
+   assert.deepEqual(lang.initialLang('', () => 'qzz', { tentative: true }), { lang: 'qzz', fromUrl: false }, 'without an index: tried by its code');
+   assert.deepEqual([scriptOf('Stronghold Protocol'), scriptOf('卫戍协议'), scriptOf('堅守協定'), scriptOf('위수 협의'), scriptOf('Протокол')], ['alphabetic', 'cjk', 'cjk', 'cjk', 'alphabetic']);
+   assert.deepEqual(langMetaOf(readPackIndex(index, 'lang')[1]).numberUnits, ['W', 'Y']);
+diff --git a/test/ui/i18n.e2e.test.js b/test/ui/i18n.e2e.test.js
+index dfd76425ae05ca384bfe5b300c41b6de41a83de1..387348e1499394ba94b91fa863e298467eeb8715 100644
+--- a/test/ui/i18n.e2e.test.js
++++ b/test/ui/i18n.e2e.test.js
+@@ -2,12 +2,12 @@
+ //
+ //   SP_E2E=1 node --test test/ui/i18n.e2e.test.js
+ //
+-// The title screen opens in Chinese; 中文 | English → English in place (no reload): the title, the start button, the
++// The title screen opens in Korean; switch to English in place (no reload): the title, the start button, the
+ // connection line, <html lang>, the tab title; the choice is kept across a reload (localStorage sp.pref.lang) and the
+ // game-data overlay (data/i18n/en.json) is applied; `?lang=zh` switches back and leaves the address bar. Language packs
+ // (docs/I18N.md "Adding a language", docs/PACKS.md): a pack file dropped into public/i18n/ and a pack folder dropped
+ // into packs/ while the server runs show in the menu and switch, with English filling what they lack; a removed pack
+-// sends a stored choice back to Chinese. The shipped Japanese, Korean and Traditional Chinese packs (the owner's decisions of
++// sends a stored choice back to Korean. The shipped Japanese, Korean and Traditional Chinese packs (the owner's decisions of
+ // 2026-10-07) switch to their official game texts and their own UI strings (what a pack lacks shows its fallback: English
+ // for ja / ko, the Simplified Chinese for zh-TW); a pack marked `machineTranslated` says so in 设置 (none in Chinese).
+ // With more than four languages the menu is a list (ui/lang.js SEGMENTED_MAX): the helpers read and pick either form.
+@@ -71,8 +71,9 @@ describe('language switch on the title screen', { skip: !ENABLED && 'set SP_E2E=
+   /** A game text of a shipped pack's overlay (data/i18n/<code>.json; a leaf is a string or { _s }). */
+   const gameText = (code) => { const v = JSON.parse(fs.readFileSync(path.join(ROOT, `data/i18n/${code}.json`), 'utf8')).files.config.modes.mode_multi_abyss.name; return typeof v === 'string' ? v : v._s; };
+ 
+-  test('中文 by default; English in place, kept across a reload; ?lang=zh back to Chinese', async () => {
++  test('Korean by default; English in place, kept across a reload; ?lang=zh back to Chinese', async () => {
+     const page = await browser.newPage();
++    await page.evaluateOnNewDocument(() => localStorage.setItem('sp.pref.assetDownload', JSON.stringify({ decision: 'declined' })));
+     await page.setViewport({ width: 1600, height: 900 });
+     const problems = [];
+     page.on('console', (m) => { if (m.type() === 'error') problems.push(`console: ${m.text()}`); });
+@@ -80,9 +81,9 @@ describe('language switch on the title screen', { skip: !ENABLED && 'set SP_E2E=
+     page.on('response', (r) => { if (r.status() >= 400 && !/fonts\.(googleapis|gstatic)/.test(r.url())) problems.push(`http ${r.status()}: ${r.url()}`); });
+     await page.goto(`${base}/`, { waitUntil: 'networkidle0' });
+     await page.waitForSelector('.title-screen [data-testid="lang-toggle"]');
+-    assert.equal(await text(page, '.title-cn'), '卫戍协议：盟约');
+-    assert.equal(await text(page, '.title-login .btn--primary'), '开始');
+-    assert.equal(await page.evaluate(() => document.documentElement.lang), 'zh-CN');
++    assert.equal(await text(page, '.title-cn'), uiText('ko', '卫戍协议：盟约'));
++    assert.equal(await text(page, '.title-login .btn--primary'), uiText('ko', '开始'));
++    assert.equal(await page.evaluate(() => document.documentElement.lang), 'ko');
+ 
+     assert.deepEqual(await menu(page), SHIPPED, 'the shipped languages');
+     await pick(page, 'en');
+@@ -149,7 +150,7 @@ describe('language switch on the title screen', { skip: !ENABLED && 'set SP_E2E=
+       await sleep(1100);
+       await page.reload({ waitUntil: 'networkidle0' });
+       await page.waitForSelector('.title-screen .title-cn');
+-      assert.equal(await text(page, '.title-cn'), '卫戍协议：盟约', 'the stored pack is gone: Chinese');
++      assert.equal(await text(page, '.title-cn'), uiText('ko', '卫戍协议：盟约'), 'the stored pack is gone: Korean');
+       assert.deepEqual(await menu(page), SHIPPED);
+       assert.deepEqual(problems, []);
+     } finally {

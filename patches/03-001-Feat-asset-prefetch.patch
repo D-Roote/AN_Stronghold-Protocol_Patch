@@ -1,0 +1,93 @@
+diff --git a/public/i18n/en.json b/public/i18n/en.json
+index bbf29fcf5ecf3411aa8e17ba4d0d343a1ec49d0c..6046bb3af3568612c2213256cf8caf8339f75e6c 100644
+--- a/public/i18n/en.json
++++ b/public/i18n/en.json
+@@ -1055,5 +1055,32 @@
+   "选择「{name}」的朝向": "Choose {name}'s facing",
+   "选择朝向": "Choose a facing",
+   "朝向：{dir}": "Facing: {dir}",
+-  "开发版 · 不稳定，请勿用于公开服务器": "Development build · unstable, not for public servers"
++  "开发版 · 不稳定，请勿用于公开服务器": "Development build · unstable, not for public servers",
++  "尚未开始": "Not started",
++  "正在准备": "Preparing",
++  "正在下载": "Downloading",
++  "已暂停": "Paused",
++  "下载完成": "Download complete",
++  "部分资源未完成": "Some assets are incomplete",
++  "此浏览器无法保存资源缓存": "This browser cannot store asset caches",
++  "按需加载": "Load when needed",
++  "同意并下载": "Accept and download",
++  "清除资源缓存": "Clear asset cache",
++  "暂停下载": "Pause download",
++  "重试下载": "Retry download",
++  "继续下载": "Resume download",
++  "游戏资源下载": "Game asset download",
++  "资源下载": "Asset download",
++  "提前下载游戏资源": "Download game assets in advance",
++  "是否提前下载游戏资源？": "Download game assets in advance?",
++  "预计约 {size}，包含图片、模型、语音和本地字体。": "About {size}, including images, models, voices and local fonts.",
++  "同意后会在后台下载，游戏仍可照常使用。选择按需加载也能正常游戏。": "With your consent, assets download in the background while you play. You can also play normally with on-demand loading.",
++  "资源保存在此浏览器中，可暂停、继续或清除。浏览器清理缓存后需要重新下载。": "Assets stay in this browser. Pause, resume or clear them any time. Clearing browser data requires another download.",
++  "此浏览器无法保存资源缓存，游戏将继续按需加载。": "This browser cannot store asset caches. The game will load assets when needed.",
++  "下载进度": "Download progress",
++  "已保存 {done} / {total} 个文件": "Saved {done} / {total} files",
++  "本次下载 {size} · 已有缓存 {count} 个": "Downloaded {size} · {count} already cached",
++  "{count} 个文件下载失败，可稍后重试。": "{count} files failed to download. You can retry later.",
++  "浏览器存储空间不足，下载已停止。可清除资源缓存后重试，或继续按需加载。": "Browser storage is full. Download paused. Clear the asset cache and retry, or keep loading assets on demand.",
++  "下载暂时未完成。已保存的资源会保留，游戏仍可使用。": "Download is incomplete. Saved assets remain available and you can keep playing."
+ }
+diff --git a/public/index.html b/public/index.html
+index 5895937aff1345ae992bf599a3c577bf493d515b..63b918e5f55482894b8ca5fc4d422bd3567a55e2 100644
+--- a/public/index.html
++++ b/public/index.html
+@@ -39,6 +39,7 @@
+   <link rel="stylesheet" href="/css/screens/guide.css" />
+   <link rel="stylesheet" href="/css/screens/loadout.css" />
+   <link rel="stylesheet" href="/css/emotes.css" />
++  <link rel="stylesheet" href="/css/asset-prefetch.css" />
+   <link rel="stylesheet" href="/css/devices.css" />
+ 
+   <script type="importmap">
+diff --git a/public/js/main.js b/public/js/main.js
+index 5b109e9170deb2d0dd73682032bfc821f49b3c2f..a08a8842c9ca3f9a79c73e34bba31e3d9c5975cb 100644
+--- a/public/js/main.js
++++ b/public/js/main.js
+@@ -45,6 +45,7 @@ import { LobbyScreen, rememberRoom, parseRoomParam } from './screens/lobby.js';
+ import { RoomScreen } from './screens/room.js';
+ import { GameScreen } from './screens/game.js';
+ import { installAudio } from './audio.js';
++import { AssetPrefetchHost } from './ui/assetPrefetch.js';
+ import { settingsStore } from './ui/settings.js';
+ import { GuideHost } from './ui/guide.js';
+ import { installDeviceSupport } from './ui/device.js';
+@@ -287,6 +288,7 @@ function App() {
+     <${UiHosts} />
+     <${GuideHost} />
+     <${LoadoutHost} />
++    <${AssetPrefetchHost} />
+   </div>`;
+ }
+ 
+diff --git a/public/js/ui/settings.js b/public/js/ui/settings.js
+index d7db406d11070268f379c23f1615acae7faa4582..63473e8c9b4cc8938a8e2d6544201b5a01861f60 100644
+--- a/public/js/ui/settings.js
++++ b/public/js/ui/settings.js
+@@ -11,6 +11,7 @@ import { createStore, useStore, loadPref, savePref } from '../store.js';
+ import { sanitizeSettings, HOTKEY_ACTIONS, DEFAULT_HOTKEYS, hotkeyLabel, rebindHotkey, isDefaultHotkeys, captureHotkey } from './gameLogic.js';
+ import { audio } from '../audio.js';
+ import { openGuide } from './guide.js';
++import { openAssetPrefetchControls } from '../assetPrefetch.js';
+ import { detectFeatures } from './device.js';
+ import { LangToggle, machineTranslationNote } from './lang.js';
+ import { t, tc, N_ } from '../../../shared/i18n.js';
+@@ -162,6 +163,10 @@ export function SettingsModal({ open, onClose }) {
+         <${LangToggle} class="set-lang" />
+       </div>
+       ${mtNote ? html`<p class="set-hint set-lang-note" data-testid="lang-mt-note">${mtNote}</p>` : null}
++      <div class="set-row">
++        <span class="set-row__label">${t('游戏资源下载')}<${MicroLabel}>ASSETS<//></span>
++        <${Button} variant="secondary" data-testid="settings-asset-download" onClick=${() => { onClose(); openAssetPrefetchControls(); }}>${t('资源下载')}<//>
++      </div>
+       <${Slider} label=${t('背景音乐')} micro="BGM" icon="play" value=${s.bgm} onInput=${(v) => updateSettings({ bgm: v })} />
+       <${Slider} label=${t('干员语音')} micro="VOICE" icon="mic" value=${s.voice} onInput=${(v) => updateSettings({ voice: v })} />
+       <${Slider} label=${t('音效')} micro="SFX" icon="signal" value=${s.sfx}

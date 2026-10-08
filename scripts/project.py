@@ -156,15 +156,18 @@ def patch_fingerprint(root, pin):
     return digest.hexdigest()
 
 
+PATCH_GROUPS = {1: "Build", 2: "UI", 3: "Feat", 4: "Resource", 5: "Fix"}
+
+
 def validate_patch_name(name):
-    match = re.fullmatch(r"([0-9]{4})-[A-Za-z][A-Za-z0-9]*-[A-Za-z0-9][A-Za-z0-9._-]*\.patch", name) if isinstance(name, str) else None
-    if match is None or int(match[1]) == 0:
-        raise ProjectError("Use a numbered English category name like 0002-UI-my-change.patch")
-    return int(match[1])
+    match = re.fullmatch(r"([0-9]{2})-([0-9]{3})-([A-Za-z][A-Za-z0-9]*)-[A-Za-z0-9][A-Za-z0-9._-]*\.patch", name) if isinstance(name, str) else None
+    if match is None or int(match[2]) == 0 or PATCH_GROUPS.get(int(match[1])) != match[3]:
+        raise ProjectError("Use a category index and sequence like 02-001-UI-my-change.patch (01 Build, 02 UI, 03 Feat, 04 Resource, 05 Fix)")
+    return int(match[1]), int(match[2])
 
 
 def ordered_patches(root):
-    """Apply patches by their numeric prefix while allowing gaps after obsolete patches are removed."""
+    """Apply category groups and their own sequence numbers; gaps are allowed."""
     folder = Path(root) / "patches"
     indexed = {}
     for path in folder.glob("*.patch"):
@@ -172,7 +175,7 @@ def ordered_patches(root):
             raise ProjectError("Source patches must be regular files, not symlinks")
         index = validate_patch_name(path.name)
         if index in indexed:
-            raise ProjectError(f"Duplicate patch index {index:04d}: {indexed[index].name}, {path.name}")
+            raise ProjectError(f"Duplicate patch index {index[0]:02d}-{index[1]:03d}: {indexed[index].name}, {path.name}")
         indexed[index] = path
     return [indexed[index] for index in sorted(indexed)]
 
@@ -368,11 +371,13 @@ def capture(root, paths, name):
     if output.exists():
         raise ProjectError("Choose a new patch name; existing patches are preserved")
     existing = ordered_patches(root)
-    next_index = validate_patch_name(existing[-1].name) + 1 if existing else 1
-    if next_index > 9999:
-        raise ProjectError("No four-digit patch sequence number remains")
-    if patch_index != next_index:
-        raise ProjectError(f"Use the next patch sequence number {next_index:04d} so the new patch applies last")
+    group, sequence = patch_index
+    members = [validate_patch_name(p.name)[1] for p in existing if validate_patch_name(p.name)[0] == group]
+    next_sequence = max(members, default=0) + 1
+    if next_sequence > 999:
+        raise ProjectError("No three-digit sequence number remains in this patch category")
+    if sequence != next_sequence:
+        raise ProjectError(f"Use the next sequence in this category: {group:02d}-{next_sequence:03d}-{PATCH_GROUPS[group]}-my-change.patch")
     selected, additions = [], []
     for value in paths:
         relative = safe_relative(value)
@@ -420,6 +425,18 @@ def capture(root, paths, name):
             final.parent.mkdir(parents=True, exist_ok=True)
             os.replace(staged_file, final)
             published.append(final)
+        # A new patch may be inserted before later categories. Reapply the complete
+        # recipe to prove the diff does not depend on code from those later patches.
+        if body and any(validate_patch_name(p.name) > patch_index for p in existing):
+            pin = load_pin(root)
+            replay = pending / "replayed-source"
+            reconstruct(root, pin, source, replay)
+            for relative in selected:
+                original, rebuilt = source / relative, replay / relative
+                expected = original.read_bytes() if original.is_file() else None
+                actual = rebuilt.read_bytes() if rebuilt.is_file() else None
+                if actual != expected:
+                    raise ProjectError(f"Inserted patch changes later patches' result: {relative}; review category dependencies")
         # Commit exactly captured paths in the private generated checkout.
         # Other staged/unstaged changes remain visible and prevent a destructive prepare.
         captured = selected + [p.relative_to(root / "overlays").as_posix() for _, p in additions]
@@ -491,6 +508,7 @@ def main(argv=None):
             command.add_argument("--snapshot", help="Private rollback snapshot ID")
         if action in {"up", "down", "status", "verify"}:
             command.add_argument("--dev", action="store_true")
+            command.add_argument("--gateway", choices=["tunnel", "nginx"], default="tunnel")
     args = parser.parse_args(argv)
     try:
         if __package__:

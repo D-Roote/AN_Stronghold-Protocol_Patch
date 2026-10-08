@@ -1,26 +1,31 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CHAT_TTL_MS } from '../../shared/chat.js';
-import { TeamChatFeed, chatSendState, chatErrorLabel, visibleChatMessages } from '../../public/js/ui/teamChat.js';
+import { CHAT_CLOSED_PREVIEW_MS } from '../../shared/chat.js';
+import {
+  TeamChatFeed, FactionTag, chatSendState, chatErrorLabel, makeClosedChatPreview, closedChatPreviewMessages, factionLabel,
+} from '../../public/js/ui/teamChat.js';
 
-describe('team chat UI: ephemeral feed', () => {
-  test('expires exactly ten seconds after local receipt, regardless of server clock', () => {
-    const messages = [
-      { id: 'old', receivedAt: 0, at: 9e12 },
-      { id: 'recent', receivedAt: 1, at: -9e12 },
-      { id: 'explicit', receivedAt: 0, expiresAt: CHAT_TTL_MS + 3 },
-      { id: 'invalid', at: Date.now() },
-    ];
-    assert.deepEqual(visibleChatMessages(messages, CHAT_TTL_MS - 1).map((m) => m.id), ['old', 'recent', 'explicit']);
-    assert.deepEqual(visibleChatMessages(messages, CHAT_TTL_MS).map((m) => m.id), ['recent', 'explicit']);
-    assert.deepEqual(visibleChatMessages(messages, CHAT_TTL_MS + 3), []);
-    assert.equal(messages.length, 4, 'render filtering leaves the controller data intact');
+describe('team chat UI: retained history and frozen closed preview', () => {
+  test('a close-time snapshot ignores later messages and disappears exactly ten seconds later', () => {
+    const messages = [{ id: 'first' }, { id: 'second' }];
+    const factions = { peer: 'kjeragShip' };
+    const preview = makeClosedChatPreview(messages, 1000, factions, 123);
+    messages.push({ id: 'later' });
+    factions.peer = 'egirShip';
+    assert.deepEqual(preview.factions, { peer: 'kjeragShip' }, 'closed nickname markers also stay frozen');
+    assert.equal(preview.scrollTop, 123, 'the close-time visible scroll position is preserved');
+    assert.deepEqual(closedChatPreviewMessages(preview, 1000 + CHAT_CLOSED_PREVIEW_MS - 1).map((message) => message.id), ['first', 'second']);
+    assert.deepEqual(closedChatPreviewMessages(preview, 1000 + CHAT_CLOSED_PREVIEW_MS), []);
+    assert.deepEqual(closedChatPreviewMessages(null, 1000), []);
   });
 
-  test('names and hostile message markup stay literal Preact text children', () => {
+  test('names, faction events and hostile message markup stay literal Preact text children', () => {
     const name = '<img src=x onerror=alert(1)>';
     const text = '<script>window.compromised=true</script><b>hello & "world"</b>';
-    const tree = TeamChatFeed({ playerId: 'me', messages: [{ id: 'a', playerId: 'me', name, text }] });
+    const tree = TeamChatFeed({ playerId: 'me', factions: { me: 'kazimierzShip' }, messages: [
+      { id: 'a', kind: 'chat', playerId: 'me', name, text },
+      { id: 'b', kind: 'faction', playerId: 'peer', name, faction: 'kjeragShip' },
+    ] });
     const nodes = [];
     const strings = [];
     const walk = (v) => {
@@ -38,6 +43,10 @@ describe('team chat UI: ephemeral feed', () => {
     assert.equal(tree.props.role, 'log');
     assert.equal(tree.props['aria-live'], 'polite');
     assert.ok(nodes.some((v) => v.props?.class === 'team-chat__message is-self'));
+    assert.ok(nodes.some((v) => v.type === FactionTag));
+    assert.ok(nodes.some((v) => v.props?.class === 'team-chat__message is-system'));
+    assert.ok(factionLabel('egirShip'));
+    assert.equal(factionLabel('forged'), '');
   });
 });
 

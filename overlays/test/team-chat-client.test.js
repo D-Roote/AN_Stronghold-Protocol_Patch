@@ -2,7 +2,8 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from '../public/js/store.js';
 import { Net } from '../public/js/net.js';
-import { installTeamChat, sendTeamChat } from '../public/js/chat.js';
+import { installTeamChat, sendTeamChat, sendTeamFaction } from '../public/js/chat.js';
+import { normalizeChatFaction } from '../shared/chat.js';
 
 function clockTimers() {
   let time = 1000; let next = 0;
@@ -40,11 +41,13 @@ function setup() {
   };
   const dispose = installTeamChat({ net, store, target, timers, now: timers.now });
   const emit = (seq, fields = {}) => listeners.get('room.chat')?.({ t: 'room.chat', code: 'ABCD', seq, playerId: peer.playerId, name: peer.name, text: '안녕', at: 1, ...fields });
-  return { timers, store, target, net, requests, emit, dispose };
+  const emitFaction = (seq, fields = {}) => listeners.get('room.faction')?.({ t: 'room.faction', code: 'ABCD', seq,
+    playerId: peer.playerId, name: peer.name, faction: 'kjeragShip', at: 1, ...fields });
+  return { timers, store, target, net, requests, emit, emitFaction, dispose };
 }
 
 describe('isolated team chat controller', () => {
-  test('TTL uses local receive time, bounds history, deduplicates and never changes match state', () => {
+  test('history remains for the room, is bounded, deduplicated and never changes match state', () => {
     const c = setup();
     try {
       const match = c.store.get().match;
@@ -52,8 +55,25 @@ describe('isolated team chat controller', () => {
       assert.equal(c.target.get().messages.length, 50); assert.equal(c.target.get().messages[0].seq, 11);
       c.emit(60); assert.equal(c.target.get().messages.length, 50);
       assert.equal(c.store.get().match, match);
-      c.timers.advance(9999); assert.equal(c.target.get().messages.length, 50);
-      c.timers.advance(1); assert.deepEqual(c.target.get().messages, []); assert.equal(c.timers.count(), 0);
+      c.timers.advance(60_000); assert.equal(c.target.get().messages.length, 50);
+      assert.equal(c.timers.count(), 0);
+    } finally { c.dispose(); }
+  });
+  test('validated faction events share history ordering and update current player markers', () => {
+    const c = setup();
+    try {
+      assert.equal(normalizeChatFaction('kjeragShip'), 'kjeragShip');
+      assert.equal(normalizeChatFaction('forged'), null);
+      c.emit(1);
+      c.emitFaction(2);
+      assert.deepEqual(c.target.get().messages.map((message) => [message.seq, message.kind]), [[1, 'chat'], [2, 'faction']]);
+      assert.equal(c.target.get().factions[peer.playerId], 'kjeragShip');
+      c.emitFaction(2, { faction: 'kazimierzShip' });
+      c.emitFaction(3, { faction: 'forged' });
+      assert.equal(c.target.get().messages.length, 2);
+      assert.equal(c.target.get().factions[peer.playerId], 'kjeragShip');
+      c.store.set({ room: { ...room(), seats: [own, { ...peer, faction: 'egirShip' }] } });
+      assert.equal(c.target.get().factions[peer.playerId], 'egirShip', 'room state is authoritative for late joins and resyncs');
     } finally { c.dispose(); }
   });
   test('room, identity and spectator transitions clear messages; unchanged room resync retains them', () => {
@@ -80,8 +100,11 @@ describe('isolated team chat controller', () => {
       assert.deepEqual(c.requests, [{ t: 'room.chat', fields: { text: '안녕 친구' }, opts: { queue: false } }]);
       c.timers.advance(999); await assert.rejects(sendTeamChat('second'), { code: 'RATE' });
       c.timers.advance(1); await sendTeamChat('second'); assert.equal(c.requests.length, 2);
+      c.timers.advance(1000); await sendTeamFaction('kazimierzShip');
+      assert.deepEqual(c.requests[2], { t: 'room.faction', fields: { faction: 'kazimierzShip' }, opts: { queue: false } });
+      await assert.rejects(sendTeamFaction('forged'), { code: 'BAD_FACTION' });
       c.net.status = 'reconnecting'; await assert.rejects(sendTeamChat('offline'), { code: 'OFFLINE' });
-      assert.equal(c.requests.length, 2); assert.equal(c.target.get().error, 'OFFLINE');
+      assert.equal(c.requests.length, 3); assert.equal(c.target.get().error, 'OFFLINE');
       c.net.status = 'online'; c.timers.advance(1000); await assert.rejects(sendTeamChat(' '), { code: 'BAD_MSG' });
     } finally { c.dispose(); }
     await assert.rejects(sendTeamChat('uninstalled'), { code: 'OFFLINE' });
