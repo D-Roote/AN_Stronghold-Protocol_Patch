@@ -8,6 +8,7 @@ import unittest
 import zipfile
 from io import BytesIO
 from pathlib import Path
+from urllib.error import HTTPError
 from unittest.mock import patch
 
 
@@ -112,6 +113,141 @@ class DeploymentTests(unittest.TestCase):
         self.assertFalse(second["configured"])
         self.assertEqual((self.service / ".pending-rollback").read_text().strip(), first["rollback"])
         self.assertEqual(len(list((self.service / "rollback").iterdir())), 1)
+
+    def existing_runtime(self):
+        (self.service / ".env").write_text("TUNNEL_TOKEN=private-token\nSTRONGHOLD_IMAGE=original:tag\n")
+        (self.service / "compose.yaml").write_text("name: stronghold\nservices: {}\n")
+
+    def test_build_freezes_same_production_tag_before_docker_overwrites_it(self):
+        self.existing_runtime()
+        target = deploy.image_name(self.pin)
+        with patch.object(deploy, "_image_id", return_value="old-image"), patch.object(deploy, "_desired_image_name", return_value=target), patch.object(deploy, "_desired_image_id", return_value="new-image"), patch.object(deploy, "_run", return_value="") as run:
+            result = deploy.build(self.root, self.pin, self.source)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(commands[0][:3], ["docker", "image", "tag"])
+        self.assertEqual(commands[1][:2], ["docker", "build"])
+        backup = self.service / "rollback" / result["rollback"]
+        metadata = json.loads((backup / "backup.json").read_text())
+        self.assertEqual(metadata["image"], "old-image")
+        self.assertEqual(metadata["reason"], "build")
+        self.assertEqual((self.service / ".pending-rollback").read_text().strip(), result["rollback"])
+        self.assertNotIn("private-token", json.dumps(result))
+
+    def test_build_different_development_tag_does_not_create_production_snapshot(self):
+        self.existing_runtime()
+        with patch.object(deploy, "_image_id", return_value="old-image"), patch.object(deploy, "_desired_image_name", return_value="production:tag"), patch.object(deploy, "_snapshot") as snapshot, patch.object(deploy, "_run", return_value="") as run:
+            result = deploy.build(self.root, self.pin, self.source, image="development:tag")
+        snapshot.assert_not_called()
+        self.assertEqual(run.call_args.args[0][:2], ["docker", "build"])
+        self.assertIsNone(result["rollback"])
+        self.assertFalse((self.service / ".pending-rollback").exists())
+
+    def test_cached_same_image_build_discards_only_new_pending_marker(self):
+        self.existing_runtime()
+        (self.service / ".latest-rollback").write_text("20261007T120000.000001Z\n")
+        target = deploy.image_name(self.pin)
+        with patch.object(deploy, "_image_id", return_value="same-image"), patch.object(deploy, "_desired_image_name", return_value=target), patch.object(deploy, "_desired_image_id", return_value="same-image"), patch.object(deploy, "_run", return_value=""):
+            result = deploy.build(self.root, self.pin, self.source)
+        self.assertIsNone(result["rollback"])
+        self.assertFalse((self.service / ".pending-rollback").exists())
+        self.assertEqual((self.service / ".latest-rollback").read_text(), "20261007T120000.000001Z\n")
+        self.assertEqual(len(list((self.service / "rollback").iterdir())), 1)
+
+    def test_failed_build_retains_complete_previous_image_backup(self):
+        self.existing_runtime()
+        target = deploy.image_name(self.pin)
+
+        def command(args, **unused):
+            if args[:2] == ["docker", "build"]:
+                raise deploy.DeploymentError("Build failed")
+            return ""
+
+        with patch.object(deploy, "_image_id", return_value="old-image"), patch.object(deploy, "_desired_image_name", return_value=target), patch.object(deploy, "_run", side_effect=command):
+            with self.assertRaises(deploy.DeploymentError):
+                deploy.build(self.root, self.pin, self.source)
+        name = (self.service / ".pending-rollback").read_text().strip()
+        backup = self.service / "rollback" / name
+        self.assertTrue(all((backup / file).is_file() for file in ("compose.yaml", ".env", "backup.json")))
+        self.assertIn("STRONGHOLD_IMAGE=original:tag", (self.service / ".env").read_text())
+
+    def test_missing_old_image_reference_commits_only_verified_running_app(self):
+        self.existing_runtime()
+
+        def command(args, **unused):
+            if args[:3] == ["docker", "image", "tag"]:
+                return None
+            if args[:2] == ["docker", "inspect"]:
+                return "old-image true\n"
+            return "sha256:committed-image\n"
+
+        with patch.object(deploy, "_image_id", return_value="old-image"), patch.object(deploy, "_application_container", return_value="app-container"), patch.object(deploy, "_run", side_effect=command) as run:
+            name = deploy._snapshot(self.service)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(commands[2][:4], ["docker", "commit", "--pause=true", "app-container"])
+        metadata = json.loads((self.service / "rollback" / name / "backup.json").read_text())
+        self.assertEqual(metadata["image_preservation"], "container-commit")
+        self.assertEqual(commands[2][4], metadata["backup_image"])
+        self.assertIn(metadata["backup_image"], (self.service / "rollback" / name / ".env").read_text())
+
+    def test_snapshot_refuses_to_commit_stopped_or_replaced_application(self):
+        self.existing_runtime()
+        for state in ("old-image false", "different-image true"):
+            with self.subTest(state=state):
+                def command(args, **unused):
+                    if args[:3] == ["docker", "image", "tag"]:
+                        return None
+                    if args[:2] == ["docker", "inspect"]:
+                        return state
+                    self.fail("Snapshot committed an unverified application container")
+
+                with patch.object(deploy, "_image_id", return_value="old-image"), patch.object(deploy, "_application_container", return_value="app-container"), patch.object(deploy, "_run", side_effect=command):
+                    with self.assertRaises(deploy.DeploymentError):
+                        deploy._snapshot(self.service)
+                self.assertFalse((self.service / ".pending-rollback").exists())
+                self.assertFalse(list((self.service / "rollback").iterdir()))
+
+    def test_failed_container_commit_leaves_runtime_and_pending_state_unchanged(self):
+        self.existing_runtime()
+        original_env = (self.service / ".env").read_bytes()
+        original_compose = (self.service / "compose.yaml").read_bytes()
+
+        def command(args, **unused):
+            if args[:3] == ["docker", "image", "tag"]:
+                return None
+            if args[:2] == ["docker", "inspect"]:
+                return "old-image true\n"
+            raise deploy.DeploymentError("Docker commit failed; output withheld")
+
+        with patch.object(deploy, "_image_id", return_value="old-image"), patch.object(deploy, "_application_container", return_value="app-container"), patch.object(deploy, "_run", side_effect=command):
+            with self.assertRaises(deploy.DeploymentError):
+                deploy._snapshot(self.service)
+        self.assertFalse((self.service / ".pending-rollback").exists())
+        self.assertFalse(list((self.service / "rollback").iterdir()))
+        self.assertEqual((self.service / ".env").read_bytes(), original_env)
+        self.assertEqual((self.service / "compose.yaml").read_bytes(), original_compose)
+
+    def test_incomplete_pending_snapshot_cannot_be_reused(self):
+        self.existing_runtime()
+        name = "20261007T120000.000001Z"
+        folder = self.service / "rollback" / name
+        folder.mkdir(parents=True)
+        (folder / "compose.yaml").write_text("name: stronghold\n")
+        (self.service / ".pending-rollback").write_text(name + "\n")
+        with patch.object(deploy, "_run") as run:
+            with self.assertRaises(deploy.DeploymentError):
+                deploy._snapshot(self.service)
+        run.assert_not_called()
+
+    def test_up_of_unchanged_image_after_failed_build_preserves_previous_latest(self):
+        self.existing_runtime()
+        (self.service / ".latest-rollback").write_text("20261007T120000.000001Z\n")
+        with patch.object(deploy, "_image_id", return_value="same-image"), patch.object(deploy, "_run", return_value=""):
+            deploy._snapshot(self.service, reason="build")
+        with patch.object(deploy, "_image_id", return_value="same-image"), patch.object(deploy, "_desired_image_id", return_value="same-image"), patch.object(deploy, "_run", return_value=""), patch.object(deploy, "_health", return_value={"ok": True, "app": "0.2.1"}):
+            result = deploy.up(self.root, self.pin, self.source)
+        self.assertIsNone(result["rollback"])
+        self.assertFalse((self.service / ".pending-rollback").exists())
+        self.assertEqual((self.service / ".latest-rollback").read_text(), "20261007T120000.000001Z\n")
 
     def test_configure_rejects_wrong_root_env_link_before_mutating_runtime(self):
         self.existing_assets()
@@ -259,7 +395,7 @@ class DeploymentTests(unittest.TestCase):
                 return "sha256:image\n"
             return "Voices: KR · 1 operators · 1 files · 0 errors"
 
-        with patch.object(deploy, "_run", side_effect=command) as run, patch.object(deploy, "_health", return_value={"ok": True, "app": "0.2.1"}):
+        with patch.object(deploy, "_run", side_effect=command) as run, patch.object(deploy, "_health", return_value={"ok": True, "app": "0.2.1"}), patch.object(deploy, "_korean_pack", return_value={"lang": "ko", "listed": True}):
             result = deploy.verify(self.root, self.pin, self.source)
         self.assertEqual(result["assets"], expected)
         self.assertTrue(result["healthy"])
@@ -279,16 +415,83 @@ class DeploymentTests(unittest.TestCase):
                 return json.dumps({"sha256": "0" * 64, "entries": 1, "references": 1, "missing": 0})
             self.fail("Verification continued after a mismatched mounted manifest")
 
-        with patch.object(deploy, "_run", side_effect=command):
+        with patch.object(deploy, "_run", side_effect=command), patch.object(deploy, "_korean_pack", return_value={"lang": "ko", "listed": True}):
             with self.assertRaises(deploy.DeploymentError):
                 deploy.verify(self.root, self.pin, self.source)
 
     def test_verify_rejects_writable_asset_mount(self):
         local, manifest = self.existing_assets()
         mounts = [{"Type": "bind", "Source": str(local), "Destination": "/app/public/assets/local", "RW": True}]
-        with patch.object(deploy, "_run", side_effect=["container-id\n", json.dumps(mounts)]):
+        with patch.object(deploy, "_run", side_effect=["container-id\n", json.dumps(mounts)]), patch.object(deploy, "_korean_pack", return_value={"lang": "ko", "listed": True}):
             with self.assertRaises(deploy.DeploymentError):
                 deploy.verify(self.root, self.pin, self.source)
+
+    def language_responses(self, **overrides):
+        responses = {
+            "/packs/index.json": {"packs": [{"type": "lang", "lang": "ko", "files": {
+                "ui": "/i18n/ko.json", "data": "/data/i18n/ko.json"}}]},
+            "/i18n/ko.json": {"_meta": {"lang": "ko"}, "原文": "번역"},
+            "/data/i18n/ko.json": {"lang": "ko", "files": {"operators": {"name": "이름"}}},
+        }
+        responses.update(overrides)
+
+        def fetch(url, **unused):
+            value = responses[deploy.urlsplit(url).path]
+            if isinstance(value, BaseException):
+                raise value
+            return BytesIO(value if isinstance(value, bytes) else json.dumps(value).encode())
+
+        return fetch
+
+    def test_korean_pack_requires_browser_index_ui_and_game_data(self):
+        with patch.object(deploy.urllib.request, "urlopen", side_effect=self.language_responses()) as fetch:
+            result = deploy._korean_pack(3000)
+        self.assertEqual(result, {"lang": "ko", "listed": True, "ui_strings": 1, "game_tables": 1})
+        self.assertEqual([deploy.urlsplit(call.args[0]).path for call in fetch.call_args_list],
+                         ["/packs/index.json", "/i18n/ko.json", "/data/i18n/ko.json"])
+
+    def test_korean_pack_missing_from_index_is_rejected(self):
+        for index in ({"packs": []}, {"packs": [{"type": "lang", "lang": "en"}]}, {"packs": "invalid"}, {}):
+            with self.subTest(index=index), patch.object(deploy.urllib.request, "urlopen", side_effect=self.language_responses(**{"/packs/index.json": index})):
+                with self.assertRaises(deploy.DeploymentError):
+                    deploy._korean_pack(3000)
+
+    def test_korean_pack_duplicate_or_missing_file_index_is_rejected(self):
+        entry = {"type": "lang", "lang": "ko", "files": {"ui": "/i18n/ko.json", "data": "/data/i18n/ko.json"}}
+        indexes = [{"packs": [entry, entry]},
+                   {"packs": [{"type": "lang", "lang": "ko", "files": {"ui": "/i18n/ko.json"}}]},
+                   {"packs": [{"type": "lang", "lang": "ko", "files": {"ui": "https://external/private", "data": "/data/i18n/ko.json"}}]}]
+        for index in indexes:
+            with self.subTest(index=index), patch.object(deploy.urllib.request, "urlopen", side_effect=self.language_responses(**{"/packs/index.json": index})) as fetch:
+                with self.assertRaises(deploy.DeploymentError):
+                    deploy._korean_pack(3000)
+                self.assertEqual(fetch.call_count, 1)
+
+    def test_korean_pack_permission_errors_and_http_errors_are_rejected(self):
+        for endpoint in ("/packs/index.json", "/i18n/ko.json", "/data/i18n/ko.json"):
+            for error in (PermissionError("EACCES private-token"), HTTPError("http://127.0.0.1" + endpoint, 404, "private-token", {}, None)):
+                with self.subTest(endpoint=endpoint, error=type(error).__name__), patch.object(deploy.urllib.request, "urlopen", side_effect=self.language_responses(**{endpoint: error})):
+                    with self.assertRaises(deploy.DeploymentError) as raised:
+                        deploy._korean_pack(3000)
+                    self.assertNotIn("private-token", str(raised.exception))
+
+    def test_korean_pack_invalid_ui_metadata_or_no_strings_is_rejected(self):
+        for ui in ({"_meta": {"lang": "en"}, "原文": "번역"}, {"_meta": {"lang": "ko"}}, b"not-json", []):
+            with self.subTest(ui=ui), patch.object(deploy.urllib.request, "urlopen", side_effect=self.language_responses(**{"/i18n/ko.json": ui})):
+                with self.assertRaises(deploy.DeploymentError):
+                    deploy._korean_pack(3000)
+
+    def test_korean_pack_invalid_game_data_language_or_no_tables_is_rejected(self):
+        for game in ({"lang": "en", "files": {"operators": {}}}, {"lang": "ko", "files": {}}, {"lang": "ko"}, b"not-json"):
+            with self.subTest(game=game), patch.object(deploy.urllib.request, "urlopen", side_effect=self.language_responses(**{"/data/i18n/ko.json": game})):
+                with self.assertRaises(deploy.DeploymentError):
+                    deploy._korean_pack(3000)
+
+    def test_verify_stops_when_runtime_index_has_lost_korean_selection(self):
+        with patch.object(deploy, "_run", return_value="container-id\n") as run, patch.object(deploy.urllib.request, "urlopen", side_effect=self.language_responses(**{"/packs/index.json": {"packs": []}})):
+            with self.assertRaises(deploy.DeploymentError):
+                deploy.verify(self.root, self.pin, self.source)
+        self.assertEqual(run.call_count, 1)
 
     def test_malicious_snapshot_names_and_markers_are_rejected(self):
         (self.service / ".env").write_text("TUNNEL_TOKEN=private\n")

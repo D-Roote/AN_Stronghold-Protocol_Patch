@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 import time
 import urllib.request
+from urllib.error import HTTPError
 from urllib.parse import unquote, urlsplit
 import zipfile
 from datetime import datetime, timezone
@@ -312,18 +313,28 @@ def _compose(service, *, dev=False, env_file=None, compose_file=None):
     return ["docker", "compose", "--env-file", env_file or service / ".env", "-f", config]
 
 
-def _image_id(service):
+def _application_container(service):
     config, env = service / "compose.yaml", service / ".env"
     if not config.is_file() or not env.is_file():
         return None
     ids = _run([*_compose(service), "ps", "-q", "stronghold"], optional=True)
     if not ids or not ids.strip():
         return None
-    image = _run(["docker", "inspect", "--format", "{{.Image}}", ids.strip().splitlines()[0]], optional=True)
+    containers = ids.strip().splitlines()
+    if len(containers) != 1:
+        raise DeploymentError("Exactly one running application container is required for rollback preservation")
+    return containers[0]
+
+
+def _image_id(service):
+    container = _application_container(service)
+    if container is None:
+        return None
+    image = _run(["docker", "inspect", "--format", "{{.Image}}", container], optional=True)
     return image.strip() if image else None
 
 
-def _snapshot(service, *, pending=True):
+def _snapshot(service, *, pending=True, reason="configuration"):
     if not (service / "compose.yaml").is_file() or not (service / ".env").is_file():
         return None
     marker = service / ".pending-rollback"
@@ -331,27 +342,49 @@ def _snapshot(service, *, pending=True):
         existing = marker.read_text(encoding="utf-8").strip()
         if not _SNAPSHOT_NAME.fullmatch(existing):
             raise DeploymentError("Pending rollback snapshot name is invalid")
-        if (service / "rollback" / existing / "compose.yaml").is_file():
-            return existing
+        folder = service / "rollback" / existing
+        if all((folder / filename).is_file() for filename in ("compose.yaml", ".env", "backup.json")):
+            try:
+                metadata = json.loads((folder / "backup.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                raise DeploymentError("Pending rollback metadata is invalid") from None
+            if isinstance(metadata, dict) and metadata.get("created_utc") == existing:
+                return existing
         raise DeploymentError("Pending rollback metadata is invalid")
     name = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     folder = service / "rollback" / name
     folder.mkdir(parents=True, mode=0o700)
-    image = _image_id(service)
-    backup_image = None
-    if image:
-        backup_image = "stronghold-protocol:rollback-" + name.lower().replace(".", "-")
-        _run(["docker", "image", "tag", image, backup_image])
-    shutil.copyfile(service / "compose.yaml", folder / "compose.yaml")
-    (folder / "compose.yaml").chmod(0o600)
-    text = (service / ".env").read_text(encoding="utf-8")
-    if image:
-        text = _rewrite_env(text, {"STRONGHOLD_IMAGE": backup_image})
-    _atomic(folder / ".env", text, private=True)
-    _json(folder / "backup.json", {"created_utc": name, "image": image,
-                                   "backup_image": backup_image}, private=True)
-    if pending:
-        _atomic(marker, name + "\n", private=True)
+    try:
+        image = _image_id(service)
+        backup_image, preservation = None, None
+        if image:
+            backup_image = "stronghold-protocol:rollback-" + name.lower().replace(".", "-")
+            tagged = _run(["docker", "image", "tag", image, backup_image], optional=True)
+            preservation = "tag"
+            if tagged is None:
+                # Some containerd builders remove the old image reference when a tag
+                # is replaced. Preserve only the verified, running app container.
+                container = _application_container(service)
+                state = (_run(["docker", "inspect", "--format", "{{.Image}} {{.State.Running}}", container],
+                              optional=True) if container else None)
+                if not state or state.strip() != f"{image} true":
+                    raise DeploymentError("Previous app image is unavailable and its running container cannot be preserved")
+                _run(["docker", "commit", "--pause=true", container, backup_image])
+                preservation = "container-commit"
+        shutil.copyfile(service / "compose.yaml", folder / "compose.yaml")
+        (folder / "compose.yaml").chmod(0o600)
+        text = (service / ".env").read_text(encoding="utf-8")
+        if image:
+            text = _rewrite_env(text, {"STRONGHOLD_IMAGE": backup_image})
+        _atomic(folder / ".env", text, private=True)
+        _json(folder / "backup.json", {"created_utc": name, "image": image, "backup_image": backup_image,
+                                       "image_preservation": preservation, "reason": reason}, private=True)
+        if pending:
+            _atomic(marker, name + "\n", private=True)
+    except Exception:
+        # Publish a marker only after every backup file and image was preserved.
+        shutil.rmtree(folder)
+        raise
     return name
 
 
@@ -390,16 +423,27 @@ def configure(root, pin, source, *, image=None):
 
 
 def build(root, pin, source, *, image=None, fetch_assets="1"):
-    root, _, _ = _paths(root)
+    root, service, _ = _paths(root)
     source = Path(source).resolve()
     if not (source / "Dockerfile").is_file():
         raise DeploymentError("Prepare the patched application source before building")
     if str(fetch_assets) not in {"0", "1"}:
         raise DeploymentError("fetch_assets must be 0 or 1")
     name = image_name(pin, image)
+    snapshot, current = None, _image_id(service)
+    had_pending = (service / ".pending-rollback").is_file()
+    if current is not None and _desired_image_name(service) == name:
+        # Freeze before Docker overwrites this exact production tag. Building a
+        # separate development/custom tag does not create a production snapshot.
+        snapshot = _snapshot(service, reason="build")
     _run(["docker", "build", "--build-arg", f"FETCH_ASSETS={fetch_assets}", "--build-arg", "VOICE_LANG=kr",
           "--tag", name, source], root=root)
-    return {"image": name, "built": True}
+    if snapshot and not had_pending and _desired_image_id(service) == current:
+        marker = service / ".pending-rollback"
+        if marker.is_file() and marker.read_text(encoding="utf-8").strip() == snapshot:
+            marker.unlink()
+        snapshot = None
+    return {"image": name, "built": True, "rollback": snapshot}
 
 
 def _health(port, *, attempts=30, expected_version=None):
@@ -419,14 +463,63 @@ def _health(port, *, attempts=30, expected_version=None):
     raise DeploymentError(f"Service health check did not pass on loopback port {port}")
 
 
-def _desired_image_id(service):
+def _desired_image_name(service):
     """Resolve only the configured app image from private Compose output."""
     raw = _run([*_compose(service), "config", "--format", "json"])
     try:
         image = json.loads(raw)["services"]["stronghold"]["image"]
     except (ValueError, KeyError, TypeError):
         raise DeploymentError("Application image is absent from the runtime configuration") from None
-    return _run(["docker", "image", "inspect", "--format", "{{.Id}}", image]).strip()
+    return image
+
+
+def _desired_image_id(service):
+    return _run(["docker", "image", "inspect", "--format", "{{.Id}}", _desired_image_name(service)]).strip()
+
+
+def _korean_pack(port):
+    """Check the files through HTTP, as the browser and unprivileged server see them."""
+    def fetch(endpoint):
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}{endpoint}", timeout=3) as response:
+                if getattr(response, "status", 200) != 200:
+                    raise DeploymentError(f"Korean language HTTP request failed: {endpoint}")
+                raw = response.read(16 * 1024**2 + 1)
+            if len(raw) > 16 * 1024**2:
+                raise DeploymentError(f"Korean language JSON exceeds the size limit: {endpoint}")
+            value = json.loads(raw)
+            if not isinstance(value, dict):
+                raise DeploymentError(f"Korean language endpoint must return a JSON object: {endpoint}")
+            return value
+        except HTTPError as error:
+            error.close()
+            raise DeploymentError(f"Korean language JSON is unavailable or unreadable: {endpoint}") from None
+        except (OSError, ValueError):
+            raise DeploymentError(f"Korean language JSON is unavailable or unreadable: {endpoint}") from None
+
+    index = fetch("/packs/index.json")
+    packs = index.get("packs")
+    if not isinstance(packs, list):
+        raise DeploymentError("Language pack index does not contain a packs list")
+    korean = [entry for entry in packs if isinstance(entry, dict)
+              and entry.get("type") == "lang" and entry.get("lang") == "ko"]
+    if len(korean) != 1:
+        raise DeploymentError("Korean language pack is missing or duplicated in the browser language index")
+    files = korean[0].get("files")
+    if (not isinstance(files, dict) or files.get("ui") != "/i18n/ko.json"
+            or files.get("data") != "/data/i18n/ko.json"):
+        raise DeploymentError("Korean language pack index is missing its UI or game data file")
+    ui = fetch("/i18n/ko.json")
+    metadata = ui.get("_meta")
+    strings = sum(isinstance(value, str) and bool(value.strip())
+                  for key, value in ui.items() if not key.startswith("_"))
+    if not isinstance(metadata, dict) or metadata.get("lang") != "ko" or not strings:
+        raise DeploymentError("Korean interface translation JSON has invalid metadata or no translated strings")
+    game = fetch("/data/i18n/ko.json")
+    tables = game.get("files")
+    if game.get("lang") != "ko" or not isinstance(tables, dict) or not tables:
+        raise DeploymentError("Korean game data overlay has invalid language metadata or no tables")
+    return {"lang": "ko", "listed": True, "ui_strings": strings, "game_tables": len(tables)}
 
 
 def up(root, pin=None, source=None, *, dev=False):
@@ -436,11 +529,16 @@ def up(root, pin=None, source=None, *, dev=False):
     if not dev:
         if (service / ".pending-rollback").is_file():
             rollback_id = _snapshot(service)
+            metadata = json.loads((service / "rollback" / rollback_id / "backup.json").read_text(encoding="utf-8"))
+            if metadata.get("reason") == "build":
+                current = _image_id(service)
+                if current is not None and current == _desired_image_id(service):
+                    rollback_id = None
         else:
             current = _image_id(service)
             # Restarting the same deployment must retain its previous rollback target.
             if current is not None and current != _desired_image_id(service):
-                rollback_id = _snapshot(service)
+                rollback_id = _snapshot(service, reason="image-change")
     _run([*_compose(service, dev=dev), "up", "-d", "--no-build", "--wait", "--wait-timeout", "90"])
     health = _health(3100 if dev else 3000, expected_version=pin["version"] if pin else None)
     if not dev:
@@ -473,6 +571,7 @@ def verify(root, pin=None, source=None, *, dev=False):
     ids = _run([*_compose(service, dev=dev), "ps", "-q", "stronghold"]).strip().splitlines()
     if len(ids) != 1:
         raise DeploymentError("Exactly one running application container is required for verification")
+    language_validation = _korean_pack(3100 if dev else 3000)
     asset_validation = None
     if pin:
         local, manifest = _select_assets(root, pin)
@@ -519,7 +618,7 @@ entries:data.count,references:urls.length,missing}));"""
     if pin and str(health.get("app", "")).removeprefix("v") != str(pin["version"]).removeprefix("v"):
         raise DeploymentError("Running service version differs from the pinned source version")
     return {"healthy": True, "version": health.get("app"), "voices": voices, "doctor": "passed",
-            "assets": asset_validation}
+            "assets": asset_validation, "korean_pack": language_validation}
 
 
 def rollback(root, pin=None, source=None, *, backup=None):

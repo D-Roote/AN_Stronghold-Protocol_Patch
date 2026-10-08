@@ -18,6 +18,8 @@ from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_REL = Path(".build/Stronghold-Protocol")
+# Bump when reconstruction changes generated files outside their Git contents (e.g. permissions).
+SOURCE_FORMAT_VERSION = 2
 
 
 class ProjectError(RuntimeError):
@@ -45,6 +47,7 @@ def git(source, *args, **kwargs):
 
 
 def write_json(path, data):
+    """Atomically write public project data readable by the container's runtime user."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
@@ -53,6 +56,8 @@ def write_json(path, data):
             json.dump(data, stream, ensure_ascii=False, indent=2)
             stream.write("\n")
             stream.flush()
+            # mkstemp starts at 0600; Docker COPY retains that mode but changes the owner to root.
+            os.fchmod(stream.fileno(), 0o644)
             os.fsync(stream.fileno())
         os.replace(temporary, path)
     finally:
@@ -122,7 +127,8 @@ def apply_ui_patch(document, patch):
 
 
 def patch_fingerprint(root, pin):
-    digest = hashlib.sha256(json.dumps(pin, sort_keys=True).encode())
+    digest = hashlib.sha256(json.dumps({"sourceFormat": SOURCE_FORMAT_VERSION,
+                                      "upstream": pin}, sort_keys=True).encode())
     for folder in ("patches", "overlays"):
         base = Path(root) / folder
         if not base.is_dir():

@@ -152,6 +152,8 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual(document["hello"], "교정")
         self.assertEqual(document["untouched"], "유지")
         self.assertEqual(document["_meta"]["version"], "0.2.1")
+        self.assertEqual((source / "public/i18n/ko.json").stat().st_mode & 0o777, 0o644,
+                         "Docker's node user must be able to read root-owned Korean strings")
         self.assertEqual((source / "Dockerfile").read_text(), "FROM scratch\n# Korean build marker\n")
         self.assertTrue((source / "tools/custom-check.mjs").is_file())
         self.assertEqual(self.git(source, "status", "--porcelain"), "")
@@ -161,6 +163,15 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual(self.git(self.upstream, "status", "--porcelain"), "")
         self.assertEqual(self.git(source, "remote", "get-url", "--push", "origin").strip(),
                          "no-push://generated-source")
+
+    def test_prepare_rebuilds_after_source_generation_format_changes(self):
+        source = self.prepare()
+        korean = source / "public/i18n/ko.json"
+        korean.chmod(0o600)
+        with patch.object(project, "SOURCE_FORMAT_VERSION", project.SOURCE_FORMAT_VERSION + 1):
+            self.assertEqual(self.prepare(), source)
+        self.assertEqual(korean.stat().st_mode & 0o777, 0o644)
+        self.assertEqual(json.loads(korean.read_text())["hello"], "교정")
 
     def test_initial_upstream_cache_bootstrap_checks_out_source_before_cleanliness_check(self):
         # A local bootstrap can reuse available objects, without network or real repository history.

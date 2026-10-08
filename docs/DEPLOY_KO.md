@@ -64,6 +64,26 @@ service/compose.yaml은 생성 파일이다. 템플릿 변경은 deploy/compose.
 각 항목의 base는 원본 문구, value는 적용할 한국어다. context가 포함된 msgid 키는 그대로 사용하고,
 placeholder를 보존한다. meta는 수정하는 _meta 필드만 포함한다.
 
+기존 항목은 value만 편집한다. base는 현재 표시된 교정문이 아니라 고정 원본의 번역값이므로 그대로 둔다.
+새 항목의 base는 .cache/upstream/source/public/i18n/ko.json에서 가져온다.
+이 파일은 UI 문구 교정을 담당한다. 오퍼레이터·스킬·아이템 등 게임 데이터의 공식 한국어 원문은
+별도 data/i18n/ko.json에서 가져오므로, 해당 데이터까지 변경하려면 소스 패치가 필요하다.
+
+JSON을 저장한 뒤 다음 명령으로 검사하고 서비스에 반영한다. 파일 편집이나 Git push만으로
+실행 중인 웹 서비스의 번역이 바뀌지는 않는다.
+
+~~~bash
+python3 scripts/project.py prepare
+python3 scripts/project.py check
+python3 scripts/project.py build
+python3 scripts/project.py configure
+python3 scripts/project.py up
+python3 scripts/project.py verify
+~~~
+
+한국어 선택은 제목 화면 또는 설정의 Language / 语言 메뉴에 있다.
+접속할 때 /?lang=ko를 사용하면 한국어로 시작하며 이후 선택이 브라우저에 저장된다.
+
 prepare는 원본 값이 base 또는 이미 교정된 value와 같을 때만 적용한다.
 원본에서 문구가 바뀌거나 삭제되면 해당 키를 알리고 중단한다. 교정하지 않은 새 원본 키는 보존한다.
 한국어 표현 기준은 공식 KR UI 표와 기존 번역 참고이며, 결정 단계는 커뮤니티 표현이다.
@@ -149,6 +169,7 @@ python3 scripts/project.py rollback --snapshot SNAPSHOT_ID
 ~~~
 
 구성을 변경하거나 다른 이미지로 배포하기 전에 이전 이미지와 비밀 설정을 복구 기록으로 보관한다.
+운영에 사용 중인 이미지 태그를 다시 빌드할 때도 덮어쓰기 전에 이전 이미지를 보관한다.
 복구 파일은 service/rollback 아래에 600 권한으로 보관하며 token을 출력하지 않는다.
 같은 이미지를 단순히 다시 시작하는 작업은 이전 배포의 복구 대상을 바꾸지 않는다.
 rollback은 이전 운영 이미지·설정으로 되돌린다. 실패 시 pending 복구 기록을 보존한다.
