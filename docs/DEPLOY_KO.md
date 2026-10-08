@@ -15,7 +15,7 @@ Stronghold-Protocol/
   tests/                        구성·충돌·실패 복구·비밀값 보존 검사
   .cache/upstream/source/       순수 원본 Git checkout (Git 제외)
   .build/Stronghold-Protocol/   패치 적용한 별도 Git checkout (Git 제외)
-  service/                     비밀 .env, 생성 Compose, 로컬 에셋·복구 기록 (Git 제외)
+  service/                     비밀 .env, 생성 Compose, 로컬 에셋·기존 복구 기록 (Git 제외)
   archive/                     이전 설치 및 분리 전 Git bundle (Git 제외)
 ~~~
 
@@ -158,21 +158,25 @@ ZIP SHA256, 경로, manifest 항목 수와 모든 참조 파일을 확인한 뒤
 원본 tag 이름은 lock에 기록하며, 이 자체 저장소에는 원본 tag를 가져올 필요가 없다.
 자체 릴리스에는 ko/v0.2.1-r1 같은 이름을 사용할 수 있다.
 
-## 상태, 종료와 복구
+## 상태와 종료
 
 ~~~bash
 python3 scripts/project.py status
 python3 scripts/project.py down
 python3 scripts/project.py up
+~~~
+
+기본 configure/build/up은 복구 이미지나 설정 백업을 생성하지 않는다.
+배포에 필요하면 서버를 중단하거나 컨테이너를 재생성할 수 있으며, 이전 서버·이미지 유지는 전제하지 않는다.
+현재 service/.env의 비밀값과 알 수 없는 설정은 계속 보존하고 실제 파일 권한은 600으로 유지한다.
+
+이미 만들어진 service/rollback 기록과 archive 백업은 남겨 두었다.
+rollback 명령은 이 기존 기록을 사용할 때만 유효하며, 새 배포는 복구 대상을 자동 갱신하지 않는다.
+
+~~~bash
 python3 scripts/project.py rollback
 python3 scripts/project.py rollback --snapshot SNAPSHOT_ID
 ~~~
-
-구성을 변경하거나 다른 이미지로 배포하기 전에 이전 이미지와 비밀 설정을 복구 기록으로 보관한다.
-운영에 사용 중인 이미지 태그를 다시 빌드할 때도 덮어쓰기 전에 이전 이미지를 보관한다.
-복구 파일은 service/rollback 아래에 600 권한으로 보관하며 token을 출력하지 않는다.
-같은 이미지를 단순히 다시 시작하는 작업은 이전 배포의 복구 대상을 바꾸지 않는다.
-rollback은 이전 운영 이미지·설정으로 되돌린다. 실패 시 pending 복구 기록을 보존한다.
 
 분리 전 운영 버전 0.1.4의 이미지와 로컬 에셋은 archive/legacy-v0.1.4에도 남아 있다.
 분리 전 Git 소스만 복원하려면 bundle에서 별도 작업 폴더를 만들 수 있다.

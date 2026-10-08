@@ -15,7 +15,7 @@
 | overlays/ | 원본에 추가할 자체 파일: 음성 검사기와 테스트 |
 | deploy/ | 운영·개발 설정 템플릿 및 검사 이미지 |
 | [scripts/project.py](scripts/project.py) | 원본 준비, 업데이트, 패치 추출과 구성 CLI |
-| [scripts/deploy.py](scripts/deploy.py) | 에셋 추출, 이미지 빌드, 서비스·복구 관리 |
+| [scripts/deploy.py](scripts/deploy.py) | 에셋 추출, 이미지 빌드, 서비스 운영 |
 | tests/ | 자체 구성 스크립트의 테스트 |
 
 원본 게임 기능·전투 로직·밸런스는 유지합니다. 일부 UI 기계번역은 아직 남아 있습니다.
@@ -42,8 +42,9 @@ python3 scripts/project.py verify
 ~~~bash
 python3 scripts/project.py status
 python3 scripts/project.py down
-python3 scripts/project.py rollback
 ~~~
+
+기본 배포는 복구본을 자동 생성하지 않습니다. 필요하면 서버를 중단하거나 재생성하여 적용합니다.
 
 추가 한글화, 기타 수정 및 원본 업데이트 방법은 [운영 안내](docs/DEPLOY_KO.md)에 있습니다.
 코드와 파생 패치는 [GPL-3.0-or-later](LICENSE), 원본과 게임 에셋의 고지는 [NOTICE.md](NOTICE.md)를 따릅니다.

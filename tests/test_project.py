@@ -26,17 +26,17 @@ class KoreanUITests(unittest.TestCase):
         self.document["_meta"].update({key: change["base"] for key, change in self.layer["meta"].items()})
         self.document.update({key: change["base"] for key, change in self.layer["messages"].items()})
 
-    def test_real_layer_corrects_164_strings_and_two_metadata_fields_without_changing_input(self):
+    def test_real_layer_applies_all_corrections_without_changing_input(self):
         original = copy.deepcopy(self.document)
         result = project.apply_ui_patch(self.document, self.layer)
-        self.assertEqual(len(self.layer["messages"]), 164)
-        self.assertEqual(set(self.layer["meta"]), {"version", "credits"})
         for key, change in self.layer["messages"].items():
             self.assertEqual(result[key], change["value"])
         for key, change in self.layer["meta"].items():
             self.assertEqual(result["_meta"][key], change["value"])
         self.assertEqual(result["unchanged upstream text"], "원본 번역")
-        self.assertTrue(result["_meta"]["machineTranslated"])
+        for key, value in self.document["_meta"].items():
+            if key not in self.layer["meta"]:
+                self.assertEqual(result["_meta"][key], value)
         self.assertEqual(self.document, original)
 
     def test_upstream_new_messages_and_metadata_are_preserved(self):

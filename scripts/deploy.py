@@ -18,7 +18,6 @@ import urllib.request
 from urllib.error import HTTPError
 from urllib.parse import unquote, urlsplit
 import zipfile
-from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 
@@ -32,7 +31,7 @@ _MANAGED = {"STRONGHOLD_SOURCE_DIR", "STRONGHOLD_IMAGE", "VOICE_LANG",
 _SNAPSHOT_NAME = re.compile(r"\d{8}T\d{6}\.\d{6}Z")
 
 
-def _run(args, *, root=None, capture=True, optional=False):
+def _run(args, *, root=None):
     env = os.environ.copy()
     # Compose must use the selected private env file rather than a stale shell value.
     for key in _MANAGED | {"TUNNEL_TOKEN", "COMPOSE_FILE", "COMPOSE_PROJECT_NAME"}:
@@ -41,16 +40,12 @@ def _run(args, *, root=None, capture=True, optional=False):
         result = subprocess.run([str(v) for v in args], cwd=root, env=env,
                                 text=True, capture_output=True, check=False)
     except FileNotFoundError:
-        if optional:
-            return None
         raise DeploymentError(f"Required command is unavailable: {args[0]}") from None
     if result.returncode:
-        if optional:
-            return None
         # docker compose config/errors can contain an interpolated Tunnel token.
         command = " ".join(str(v) for v in args[:2])
         raise DeploymentError(f"{command} failed (exit {result.returncode}); private output withheld")
-    return result.stdout if capture else None
+    return result.stdout
 
 
 def _atomic(path: Path, content: str, *, private=False):
@@ -313,83 +308,8 @@ def _compose(service, *, dev=False, env_file=None, compose_file=None):
     return ["docker", "compose", "--env-file", env_file or service / ".env", "-f", config]
 
 
-def _application_container(service):
-    config, env = service / "compose.yaml", service / ".env"
-    if not config.is_file() or not env.is_file():
-        return None
-    ids = _run([*_compose(service), "ps", "-q", "stronghold"], optional=True)
-    if not ids or not ids.strip():
-        return None
-    containers = ids.strip().splitlines()
-    if len(containers) != 1:
-        raise DeploymentError("Exactly one running application container is required for rollback preservation")
-    return containers[0]
-
-
-def _image_id(service):
-    container = _application_container(service)
-    if container is None:
-        return None
-    image = _run(["docker", "inspect", "--format", "{{.Image}}", container], optional=True)
-    return image.strip() if image else None
-
-
-def _snapshot(service, *, pending=True, reason="configuration"):
-    if not (service / "compose.yaml").is_file() or not (service / ".env").is_file():
-        return None
-    marker = service / ".pending-rollback"
-    if pending and marker.is_file():
-        existing = marker.read_text(encoding="utf-8").strip()
-        if not _SNAPSHOT_NAME.fullmatch(existing):
-            raise DeploymentError("Pending rollback snapshot name is invalid")
-        folder = service / "rollback" / existing
-        if all((folder / filename).is_file() for filename in ("compose.yaml", ".env", "backup.json")):
-            try:
-                metadata = json.loads((folder / "backup.json").read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                raise DeploymentError("Pending rollback metadata is invalid") from None
-            if isinstance(metadata, dict) and metadata.get("created_utc") == existing:
-                return existing
-        raise DeploymentError("Pending rollback metadata is invalid")
-    name = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
-    folder = service / "rollback" / name
-    folder.mkdir(parents=True, mode=0o700)
-    try:
-        image = _image_id(service)
-        backup_image, preservation = None, None
-        if image:
-            backup_image = "stronghold-protocol:rollback-" + name.lower().replace(".", "-")
-            tagged = _run(["docker", "image", "tag", image, backup_image], optional=True)
-            preservation = "tag"
-            if tagged is None:
-                # Some containerd builders remove the old image reference when a tag
-                # is replaced. Preserve only the verified, running app container.
-                container = _application_container(service)
-                state = (_run(["docker", "inspect", "--format", "{{.Image}} {{.State.Running}}", container],
-                              optional=True) if container else None)
-                if not state or state.strip() != f"{image} true":
-                    raise DeploymentError("Previous app image is unavailable and its running container cannot be preserved")
-                _run(["docker", "commit", "--pause=true", container, backup_image])
-                preservation = "container-commit"
-        shutil.copyfile(service / "compose.yaml", folder / "compose.yaml")
-        (folder / "compose.yaml").chmod(0o600)
-        text = (service / ".env").read_text(encoding="utf-8")
-        if image:
-            text = _rewrite_env(text, {"STRONGHOLD_IMAGE": backup_image})
-        _atomic(folder / ".env", text, private=True)
-        _json(folder / "backup.json", {"created_utc": name, "image": image, "backup_image": backup_image,
-                                       "image_preservation": preservation, "reason": reason}, private=True)
-        if pending:
-            _atomic(marker, name + "\n", private=True)
-    except Exception:
-        # Publish a marker only after every backup file and image was preserved.
-        shutil.rmtree(folder)
-        raise
-    return name
-
-
 def configure(root, pin, source, *, image=None):
-    """Generate service files; retain unknown private values and a rollback snapshot."""
+    """Generate service files while retaining unknown private values."""
     root, service, templates = _paths(root)
     source = Path(source).resolve()
     if not (source / "Dockerfile").is_file() or not (source / "package.json").is_file():
@@ -410,7 +330,6 @@ def configure(root, pin, source, *, image=None):
     changed = text != original or any(not (service / filename).is_file() or
                     (service / filename).read_text(encoding="utf-8") != body
                     for filename, body in generated.items())
-    snapshot = _snapshot(service) if changed else None
     if changed:
         _atomic(env_file, text, private=True)
         for filename, body in generated.items():
@@ -419,31 +338,20 @@ def configure(root, pin, source, *, image=None):
     if not root_env.exists() and not root_env.is_symlink():
         root_env.symlink_to("service/.env")
     return {"image": name, "source": str(source), "assets": str(local), "manifest": str(manifest),
-            "configured": changed, "rollback": snapshot}
+            "configured": changed}
 
 
 def build(root, pin, source, *, image=None, fetch_assets="1"):
-    root, service, _ = _paths(root)
+    root, _, _ = _paths(root)
     source = Path(source).resolve()
     if not (source / "Dockerfile").is_file():
         raise DeploymentError("Prepare the patched application source before building")
     if str(fetch_assets) not in {"0", "1"}:
         raise DeploymentError("fetch_assets must be 0 or 1")
     name = image_name(pin, image)
-    snapshot, current = None, _image_id(service)
-    had_pending = (service / ".pending-rollback").is_file()
-    if current is not None and _desired_image_name(service) == name:
-        # Freeze before Docker overwrites this exact production tag. Building a
-        # separate development/custom tag does not create a production snapshot.
-        snapshot = _snapshot(service, reason="build")
     _run(["docker", "build", "--build-arg", f"FETCH_ASSETS={fetch_assets}", "--build-arg", "VOICE_LANG=kr",
           "--tag", name, source], root=root)
-    if snapshot and not had_pending and _desired_image_id(service) == current:
-        marker = service / ".pending-rollback"
-        if marker.is_file() and marker.read_text(encoding="utf-8").strip() == snapshot:
-            marker.unlink()
-        snapshot = None
-    return {"image": name, "built": True, "rollback": snapshot}
+    return {"image": name, "built": True}
 
 
 def _health(port, *, attempts=30, expected_version=None):
@@ -461,20 +369,6 @@ def _health(port, *, attempts=30, expected_version=None):
             pass
         time.sleep(1)
     raise DeploymentError(f"Service health check did not pass on loopback port {port}")
-
-
-def _desired_image_name(service):
-    """Resolve only the configured app image from private Compose output."""
-    raw = _run([*_compose(service), "config", "--format", "json"])
-    try:
-        image = json.loads(raw)["services"]["stronghold"]["image"]
-    except (ValueError, KeyError, TypeError):
-        raise DeploymentError("Application image is absent from the runtime configuration") from None
-    return image
-
-
-def _desired_image_id(service):
-    return _run(["docker", "image", "inspect", "--format", "{{.Id}}", _desired_image_name(service)]).strip()
 
 
 def _korean_pack(port):
@@ -525,27 +419,9 @@ def _korean_pack(port):
 def up(root, pin=None, source=None, *, dev=False):
     _, service, _ = _paths(root)
     _run([*_compose(service, dev=dev), "config", "--quiet"])
-    rollback_id = None
-    if not dev:
-        if (service / ".pending-rollback").is_file():
-            rollback_id = _snapshot(service)
-            metadata = json.loads((service / "rollback" / rollback_id / "backup.json").read_text(encoding="utf-8"))
-            if metadata.get("reason") == "build":
-                current = _image_id(service)
-                if current is not None and current == _desired_image_id(service):
-                    rollback_id = None
-        else:
-            current = _image_id(service)
-            # Restarting the same deployment must retain its previous rollback target.
-            if current is not None and current != _desired_image_id(service):
-                rollback_id = _snapshot(service, reason="image-change")
     _run([*_compose(service, dev=dev), "up", "-d", "--no-build", "--wait", "--wait-timeout", "90"])
     health = _health(3100 if dev else 3000, expected_version=pin["version"] if pin else None)
-    if not dev:
-        if rollback_id:
-            _atomic(service / ".latest-rollback", rollback_id + "\n", private=True)
-        (service / ".pending-rollback").unlink(missing_ok=True)
-    return {"running": True, "dev": dev, "version": health.get("app"), "rollback": rollback_id}
+    return {"running": True, "dev": dev, "version": health.get("app")}
 
 
 def down(root, pin=None, source=None, *, dev=False):
@@ -639,7 +515,6 @@ def rollback(root, pin=None, source=None, *, backup=None):
     # Validate privately before replacing any current files.
     command = _compose(service, env_file=folder / ".env", compose_file=folder / "compose.yaml")
     _run([*command, "config", "--quiet"])
-    _snapshot(service, pending=False)
     _atomic(service / ".env", (folder / ".env").read_text(encoding="utf-8"), private=True)
     _atomic(service / "compose.yaml", (folder / "compose.yaml").read_text(encoding="utf-8"))
     _run([*_compose(service), "up", "-d", "--no-build", "--wait", "--wait-timeout", "90"])
