@@ -1,5 +1,5 @@
 // Transient team text chat and the compact match tools. Messages are rendered as Preact strings.
-import { useEffect, useRef, useState } from '../../vendor/hooks.module.js';
+import { useEffect, useLayoutEffect, useRef, useState } from '../../vendor/hooks.module.js';
 import { CHAT_MAX_LENGTH, CHAT_COOLDOWN_MS, CHAT_TTL_MS, normalizeChatText } from '../../../shared/chat.js';
 import { t } from '../../../shared/i18n.js';
 import { chatStore, sendTeamChat } from '../chat.js';
@@ -60,7 +60,7 @@ export function TeamChatFeed({ messages = [], playerId, empty = false }) {
 function useDismissible({ rootRef, toggleRef, focusRef, open, onToggle }) {
   const latest = useRef(onToggle);
   latest.current = onToggle;
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return undefined;
     const doc = rootRef.current?.ownerDocument;
     if (!doc) return undefined;
