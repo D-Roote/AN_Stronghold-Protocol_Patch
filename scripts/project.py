@@ -156,6 +156,27 @@ def patch_fingerprint(root, pin):
     return digest.hexdigest()
 
 
+def validate_patch_name(name):
+    match = re.fullmatch(r"([0-9]{4})-[A-Za-z][A-Za-z0-9]*-[A-Za-z0-9][A-Za-z0-9._-]*\.patch", name) if isinstance(name, str) else None
+    if match is None or int(match[1]) == 0:
+        raise ProjectError("Use a numbered English category name like 0002-UI-my-change.patch")
+    return int(match[1])
+
+
+def ordered_patches(root):
+    """Apply patches by their numeric prefix while allowing gaps after obsolete patches are removed."""
+    folder = Path(root) / "patches"
+    indexed = {}
+    for path in folder.glob("*.patch"):
+        if path.is_symlink() or not path.is_file():
+            raise ProjectError("Source patches must be regular files, not symlinks")
+        index = validate_patch_name(path.name)
+        if index in indexed:
+            raise ProjectError(f"Duplicate patch index {index:04d}: {indexed[index].name}, {path.name}")
+        indexed[index] = path
+    return [indexed[index] for index in sorted(indexed)]
+
+
 def ensure_upstream(root, pin):
     root = Path(root).resolve()
     parent = root / ".cache/upstream"
@@ -196,6 +217,7 @@ def ensure_upstream(root, pin):
 def reconstruct(root, pin, cache, destination):
     """Build into a disposable checkout; failed patches cannot modify the usable source."""
     root, cache, destination = Path(root), Path(cache), Path(destination)
+    patches = ordered_patches(root)
     run(["git", "clone", "--no-hardlinks", "--no-checkout", "--", cache, destination])
     git(destination, "config", "core.autocrlf", "false")
     git(destination, "checkout", "--detach", pin["commit"])
@@ -219,7 +241,7 @@ def reconstruct(root, pin, cache, destination):
             raise ProjectError(f"New overlay collides with upstream: {relative}")
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
-    for patch in sorted((root / "patches").glob("*.patch")):
+    for patch in patches:
         git(destination, "apply", "--check", str(patch.resolve()))
         git(destination, "apply", str(patch.resolve()))
     exclude = destination / ".git/info/exclude"
@@ -247,6 +269,7 @@ def prepare(root=ROOT, *, pin=None, force=False, _keep_previous=False):
     if target.is_symlink():
         raise ProjectError("Generated source must not be a symlink")
     stamp = target / ".stronghold-build.json"
+    ordered_patches(root)
     fingerprint = patch_fingerprint(root, pin)
     if stamp.is_file() and not force:
         metadata = json.loads(stamp.read_text())
@@ -335,15 +358,16 @@ def update(root, ref, release_sha256=None):
 
 def capture(root, paths, name):
     root, source = Path(root), Path(root) / SOURCE_REL
-    if not re.fullmatch(r"[0-9]{4}-[\w.-]+\.patch", name):
-        raise ProjectError("Use a patch name like 0002-my-change.patch")
+    patch_index = validate_patch_name(name)
     output = root / "patches" / name
     if output.exists():
         raise ProjectError("Choose a new patch name; existing patches are preserved")
-    numbers = [int(p.name[:4]) for p in (root / "patches").glob("*.patch")
-               if re.match(r"^[0-9]{4}-", p.name)]
-    if numbers and int(name[:4]) <= max(numbers):
-        raise ProjectError("Use the next patch sequence number so the new patch applies last")
+    existing = ordered_patches(root)
+    next_index = validate_patch_name(existing[-1].name) + 1 if existing else 1
+    if next_index > 9999:
+        raise ProjectError("No four-digit patch sequence number remains")
+    if patch_index != next_index:
+        raise ProjectError(f"Use the next patch sequence number {next_index:04d} so the new patch applies last")
     selected, additions = [], []
     for value in paths:
         relative = safe_relative(value)
@@ -400,7 +424,7 @@ def capture(root, paths, name):
             "-m", "Capture local patch changes", "--", *captured)
     except BaseException:
         index.write_bytes(previous_index)
-        for final in published:
+        for final in reversed(published):
             final.unlink(missing_ok=True)
         raise
     finally:

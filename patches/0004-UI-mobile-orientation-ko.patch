@@ -1,0 +1,17 @@
+diff --git a/public/index.html b/public/index.html
+index 8008741644aecdcd5951ad5e21f7d0036da75d22..ed12880dd4d8c86a8c0aca8b7db2f120b8ccd4fd 100644
+--- a/public/index.html
++++ b/public/index.html
+@@ -68,9 +68,9 @@
+ 
+   <div class="rotate-hint" role="alert">
+     <div class="rotate-hint__phone"></div>
+-    <div class="rotate-hint__title">请将设备横屏</div>
+-    <div>卫戍协议：盟约 需要横屏显示以获得完整体验</div>
+-    <div class="rotate-hint__micro">ROTATE DEVICE</div>
++    <div class="rotate-hint__title">기기를 가로로 돌려주세요</div>
++    <div>게임을 원활하게 플레이하려면 가로 화면이 필요합니다.</div>
++    <div class="rotate-hint__micro">화면 회전 안내</div>
+   </div>
+ 
+   <noscript><p style="color:#c3cbc7;text-align:center;padding:40px">需要启用 JavaScript 才能运行本游戏。</p></noscript>

@@ -8,7 +8,7 @@
 ~~~text
 Stronghold-Protocol/
   upstream.lock.json            원본 URL, 태그, 전체 커밋 SHA, Full Release SHA256
-  patches/                      한국어 교정 JSON, 순서대로 적용하는 소스 패치
+  patches/                      한국어 교정 JSON, 숫자 순서와 영어 분류를 가진 소스 패치
   overlays/                     원본에 추가할 자체 파일
   deploy/                       Compose·환경 설정·검사 이미지 템플릿
   scripts/                      Python 표준 라이브러리 구성 CLI
@@ -111,12 +111,16 @@ prepare는 원본 값이 base 또는 이미 교정된 value와 같을 때만 적
 ~~~bash
 python3 scripts/project.py prepare
 # .build/Stronghold-Protocol 안의 필요한 소스 파일 편집
-python3 scripts/project.py capture --path server/index.js --name 0004-my-change.patch
+python3 scripts/project.py capture --path server/index.js --name 0005-Feat-my-change.patch
 python3 scripts/project.py prepare
 ~~~
 
 기존 파일은 차이만 patches에 저장하고, 새 파일은 overlays의 같은 상대 경로에 저장한다.
-소스 패치는 번호 순서로 적용하므로 다음 번호를 사용한다.
+소스 패치는 0001-Build-korean-voice.patch처럼 4자리 숫자, Build-/UI-/Feat-/Fix- 등 영어 분류,
+영어 설명으로 이름을 짓는다. 숫자 오름차순으로 적용하며 별도 순서 파일은 사용하지 않는다.
+capture에는 현재 가장 큰 번호에 1을 더한 번호를 지정한다. 새 파일만 overlay로 추가하면
+소스 패치가 생성되지 않으므로 번호를 사용하지 않는다. 원본에 반영된 패치를 삭제해 번호가
+비어도 나머지 파일을 다시 번호 매길 필요는 없다. 잘못된 이름과 중복 번호는 적용 전에 오류로 처리한다.
 capture는 지정한 파일만 보존하며, 관계없는 수정이 남아 있으면 prepare가 중단한다.
 생성 소스의 보존되지 않은 수정을 덮어쓸 때만 prepare --force를 명시적으로 사용한다.
 원본에 overlay와 같은 파일이 추가되면 충돌로 중단하여 병합 여부를 검토한다.
@@ -128,11 +132,15 @@ capture는 지정한 파일만 보존하며, 관계없는 수정이 남아 있�
 KR 음성·로컬 폰트를 브라우저에 저장한다. 동의하면 게임을 이용하는 동안 두 파일씩 백그라운드로
 다운로드한다. 선택은 해당 브라우저에 저장하며, 거절해도 필요할 때 에셋을 불러와 플레이할 수 있다.
 
-제목·대기실의 에셋 다운로드 버튼이나 설정의 에셋 다운로드에서 진행률 확인, 일시정지·재개·
+최초 동의 팝업 이후에는 설정의 에셋 다운로드에서 진행률 확인, 일시정지·재개·
 재시도·캐시 삭제를 할 수 있다. 다운로드한 에셋은 이후 요청에서 재사용하며, 앱 코드·게임 데이터·
 API는 이 캐시에 넣지 않는다. 에셋 버전이 바뀌면 이전 캐시를 정리하고 새 버전으로 준비한다.
 브라우저의 저장 공간 정리로 캐시가 삭제되면 다시 다운로드해야 한다. HTTPS 또는 localhost에서
 브라우저 캐시 기능을 사용할 수 있다.
+
+좌하단에 별도의 다운로드 버튼을 표시하지 않는다. 다운로드 창은 기존 Modal/Button과
+폰트·색상 체계를 사용한다. 모바일 세로 화면의 회전 안내는 0004-UI-mobile-orientation-ko.patch에서
+한국어로 교정하며 기존 회전 그래픽과 표시 조건을 사용한다.
 
 협동 게임의 좌하단은 교류·채팅·> 순서다. 교류의 기존 이모티콘 기능을 유지하며,
 >를 펼치면 설정·매뉴얼·전체화면 버튼이 세로로 나타난다. 채팅은 같은 방의 실제 팀원에게만

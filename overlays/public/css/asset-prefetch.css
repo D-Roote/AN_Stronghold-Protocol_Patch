@@ -1,35 +1,13 @@
-/* Optional resource cache controls. */
-.asset-prefetch-launcher {
-  position: fixed;
-  left: max(14px, env(safe-area-inset-left));
-  bottom: max(14px, env(safe-area-inset-bottom));
-  z-index: 35;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  min-height: 32px;
-  padding: 6px 12px;
-  border: 1px solid rgba(78, 216, 175, .3);
-  border-radius: 5px;
-  color: var(--text, #e7f2ed);
-  background: rgba(12, 20, 18, .94);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-.asset-prefetch-launcher small { color: var(--mint, #4ed8af); }
-.asset-prefetch-launcher:focus-visible { outline: 2px solid #4ed8af; outline-offset: 3px; }
-.sp-in-match .asset-prefetch-launcher { display: none; }
-.asset-prefetch { line-height: 1.6; }
+/* Asset controls share the existing Modal/Button typography and theme. */
+.asset-prefetch { font: inherit; line-height: 1.6; }
 .asset-prefetch p { margin: 0 0 12px; }
-.asset-prefetch__hint { color: var(--text-dim, #aab8b1); font-size: .92em; }
-.asset-prefetch__progress { padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, .12); }
+.asset-prefetch__hint { color: var(--text-lo); font-size: .92em; }
+.asset-prefetch__progress { padding-top: 14px; border-top: 1px solid var(--line); }
 .asset-prefetch__status { margin-bottom: 6px; }
-.asset-prefetch progress { width: 100%; height: 12px; accent-color: #4ed8af; }
+.asset-prefetch progress { width: 100%; height: 12px; accent-color: var(--mint-500); }
 .asset-prefetch__counts { margin-top: 6px; font-variant-numeric: tabular-nums; }
-.asset-prefetch__notice { color: #ffd089; margin-top: 10px !important; }
+.asset-prefetch__notice { color: var(--amber); margin-top: 10px !important; }
 @media (max-height: 480px) {
   .asset-prefetch p { margin-bottom: 7px; }
   .asset-prefetch__hint { font-size: .85em; }
-  .asset-prefetch-launcher { bottom: 8px; left: 8px; min-height: 28px; padding: 4px 8px; }
 }

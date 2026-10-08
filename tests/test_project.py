@@ -127,7 +127,7 @@ class ProjectTests(unittest.TestCase):
                       "meta": {"version": {"base": "0.2.0", "value": "0.2.1"}},
                       "messages": {"hello": {"base": "원본", "value": "교정"}}}
         project.write_json(self.root / "patches/ko-ui.json", self.layer)
-        (self.root / "patches/0001-marker.patch").write_text(
+        (self.root / "patches/0001-Build-marker.patch").write_text(
             "diff --git a/Dockerfile b/Dockerfile\n"
             "--- a/Dockerfile\n+++ b/Dockerfile\n@@ -1,2 +1,2 @@\n"
             " FROM scratch\n-# upstream marker\n+# Korean build marker\n")
@@ -273,7 +273,7 @@ class ProjectTests(unittest.TestCase):
             "upstream.lock.json", ".build/Stronghold-Protocol/.stronghold-build.json",
             ".build/Stronghold-Protocol/Dockerfile")}
         head = self.git(source, "rev-parse", "HEAD")
-        (self.root / "patches/0002-broken.patch").write_text(
+        (self.root / "patches/0002-Fix-broken.patch").write_text(
             "diff --git a/Dockerfile b/Dockerfile\n--- a/Dockerfile\n+++ b/Dockerfile\n"
             "@@ -1 +1 @@\n-does not exist\n+broken\n")
         with self.assertRaises(project.ProjectError):
@@ -321,20 +321,24 @@ class ProjectTests(unittest.TestCase):
         source = self.prepare()
         edited = (source / "Dockerfile").read_text() + "# additional local customization\n"
         (source / "Dockerfile").write_text(edited)
-        result = project.capture(self.root, ["Dockerfile"], "0002-extra.patch")
-        self.assertEqual(result, {"patch": "patches/0002-extra.patch", "overlays": []})
+        result = project.capture(self.root, ["Dockerfile"], "0002-Feat-extra.patch")
+        self.assertEqual(result, {"patch": "patches/0002-Feat-extra.patch", "overlays": []})
         self.assertIn("+# additional local customization", (self.root / result["patch"]).read_text())
+        self.assertEqual([p.name for p in project.ordered_patches(self.root)],
+                         ["0001-Build-marker.patch", "0002-Feat-extra.patch"])
         self.prepare()
         self.assertEqual((source / "Dockerfile").read_text(), edited)
         self.assertEqual(self.git(source, "status", "--porcelain"), "")
 
     def test_capture_new_source_file_roundtrips_as_overlay(self):
         source = self.prepare()
+        patches_before = project.ordered_patches(self.root)
         addition = source / "tools/extra.mjs"
         addition.write_text("export const added = true;\n")
-        result = project.capture(self.root, ["tools/extra.mjs"], "0002-extra.patch")
+        result = project.capture(self.root, ["tools/extra.mjs"], "0002-Feat-extra.patch")
         self.assertEqual(result, {"patch": None, "overlays": ["overlays/tools/extra.mjs"]})
-        self.assertFalse((self.root / "patches/0002-extra.patch").exists())
+        self.assertFalse((self.root / "patches/0002-Feat-extra.patch").exists())
+        self.assertEqual(project.ordered_patches(self.root), patches_before)
         self.prepare()
         self.assertEqual(addition.read_text(), "export const added = true;\n")
         self.assertEqual(self.git(source, "status", "--porcelain"), "")
@@ -347,7 +351,7 @@ class ProjectTests(unittest.TestCase):
         source = self.prepare()
         changed = b"\x00\x02changed\xff\xfe"
         (source / "fixture.bin").write_bytes(changed)
-        result = project.capture(self.root, ["fixture.bin"], "0002-binary.patch")
+        result = project.capture(self.root, ["fixture.bin"], "0002-Fix-binary.patch")
         self.assertIn("GIT binary patch", (self.root / result["patch"]).read_text())
         self.prepare()
         self.assertEqual((source / "fixture.bin").read_bytes(), changed)
@@ -365,7 +369,7 @@ class ProjectTests(unittest.TestCase):
         project.write_json(translations, document)
         expected_package, expected_translations = package.read_bytes(), translations.read_bytes()
         original_package = self.git(source, "show", "HEAD:package.json")
-        project.capture(self.root, ["Dockerfile"], "0002-captured.patch")
+        project.capture(self.root, ["Dockerfile"], "0002-Fix-captured.patch")
         self.assertIn("# captured change", self.git(source, "show", "HEAD:Dockerfile"))
         self.assertEqual(self.git(source, "show", "HEAD:package.json"), original_package)
         self.assertEqual(self.git(source, "show", ":package.json").encode(), expected_package)
@@ -387,8 +391,8 @@ class ProjectTests(unittest.TestCase):
         translations = source / "public/i18n/ko.json"
         translations.write_text(translations.read_text() + "\n")
         with self.assertRaisesRegex(project.ProjectError, "individual source files"):
-            project.capture(self.root, ["public"], "0002-directory.patch")
-        self.assertFalse((self.root / "patches/0002-directory.patch").exists())
+            project.capture(self.root, ["public"], "0002-Fix-directory.patch")
+        self.assertFalse((self.root / "patches/0002-Fix-directory.patch").exists())
         self.assertTrue(self.git(source, "status", "--porcelain").strip())
 
     def assert_capture_failure_preserves_edits(self, source, failure):
@@ -403,8 +407,8 @@ class ProjectTests(unittest.TestCase):
         original_head = self.git(source, "rev-parse", "HEAD")
         expected = {file: file.read_bytes() for file in (docker, new_file, package)}
         with failure, self.assertRaises((project.ProjectError, OSError)):
-            project.capture(self.root, ["Dockerfile", "tools/new-check.mjs"], "0002-pending.patch")
-        self.assertFalse((self.root / "patches/0002-pending.patch").exists())
+            project.capture(self.root, ["Dockerfile", "tools/new-check.mjs"], "0002-Feat-pending.patch")
+        self.assertFalse((self.root / "patches/0002-Feat-pending.patch").exists())
         self.assertFalse((self.root / "overlays/tools/new-check.mjs").exists())
         self.assertEqual((source / ".git/index").read_bytes(), original_index)
         self.assertEqual(self.git(source, "rev-parse", "HEAD"), original_head)
@@ -437,6 +441,84 @@ class ProjectTests(unittest.TestCase):
         self.assert_capture_failure_preserves_edits(
             source, patch.object(project.os, "replace", side_effect=failing_publication))
 
+    def test_capture_appends_after_existing_index_gap(self):
+        folder = self.root / "patches"
+        (folder / "0001-Build-marker.patch").rename(folder / "0007-Build-marker.patch")
+        source = self.prepare()
+        target = source / "Dockerfile"
+        expected = target.read_text() + "# captured after a gap\n"
+        target.write_text(expected)
+        result = project.capture(self.root, ["Dockerfile"], "0008-Feat-gap.patch")
+        self.assertEqual(result["patch"], "patches/0008-Feat-gap.patch")
+        self.assertEqual([p.name for p in project.ordered_patches(self.root)],
+                         ["0007-Build-marker.patch", "0008-Feat-gap.patch"])
+        self.prepare()
+        self.assertEqual(target.read_text(), expected)
+
+    def test_numeric_order_applies_dependent_patches_with_gaps(self):
+        folder = self.root / "patches"
+        (folder / "0007-UI-followup.patch").write_text(
+            "diff --git a/Dockerfile b/Dockerfile\n--- a/Dockerfile\n+++ b/Dockerfile\n"
+            "@@ -1,2 +1,2 @@\n FROM scratch\n"
+            "-# Korean build marker\n+# Korean build marker extended\n")
+        source = self.prepare()
+        expected = (source / "Dockerfile").read_bytes()
+        self.assertIn(b"marker extended", expected)
+        (folder / "0001-Build-marker.patch").rename(folder / "0008-Build-marker.patch")
+        with self.assertRaises(project.ProjectError):
+            self.prepare()
+        self.assertEqual((source / "Dockerfile").read_bytes(), expected)
+
+    def test_invalid_patch_names_and_duplicate_indices_keep_prepared_source(self):
+        source = self.prepare()
+        head = self.git(source, "rev-parse", "HEAD")
+        for name in ["Build-unnumbered.patch", "0000-UI-zero.patch", "0002-old.patch",
+                     "0002-Build-.patch", "00002-UI-wide.patch", "0001-Feat-duplicate.patch"]:
+            with self.subTest(name=name):
+                invalid = self.root / "patches" / name
+                invalid.write_text("")
+                try:
+                    with self.assertRaises(project.ProjectError):
+                        self.prepare()
+                    self.assertEqual(self.git(source, "rev-parse", "HEAD"), head)
+                finally:
+                    invalid.unlink()
+        invalid = self.root / "patches/0002-UI-link.patch"
+        invalid.symlink_to(self.root / "patches/0001-Build-marker.patch")
+        with self.assertRaises(project.ProjectError):
+            self.prepare()
+        invalid.unlink()
+        invalid.mkdir()
+        with self.assertRaisesRegex(project.ProjectError, "regular files"):
+            self.prepare()
+        self.assertEqual(self.git(source, "rev-parse", "HEAD"), head)
+
+    def test_capture_first_patch_starts_at_one_without_order_file(self):
+        (self.root / "patches/0001-Build-marker.patch").unlink()
+        source = self.prepare()
+        target = source / "Dockerfile"
+        expected = target.read_text() + "# first captured patch\n"
+        target.write_text(expected)
+        project.capture(self.root, ["Dockerfile"], "0001-Build-first.patch")
+        self.assertEqual([p.name for p in project.ordered_patches(self.root)], ["0001-Build-first.patch"])
+        self.assertFalse((self.root / "patches/series").exists())
+        self.prepare()
+        self.assertEqual(target.read_text(), expected)
+
+    def test_capture_rejects_unnumbered_out_of_sequence_and_path_names_without_exporting(self):
+        source = self.prepare()
+        docker = source / "Dockerfile"
+        expected = docker.read_text() + "# pending edit\n"
+        docker.write_text(expected)
+        patches_before = project.ordered_patches(self.root)
+        for name in ["Feat-unnumbered.patch", "0002-old.patch", "0000-UI-zero.patch",
+                     "0001-Feat-reused.patch", "0003-Feat-skipped.patch",
+                     "../0002-UI-escape.patch", "0002-UI-dir/change.patch"]:
+            with self.subTest(name=name), self.assertRaises(project.ProjectError):
+                project.capture(self.root, ["Dockerfile"], name)
+        self.assertEqual(docker.read_text(), expected)
+        self.assertEqual(project.ordered_patches(self.root), patches_before)
+
     def test_capture_rejects_private_downloaded_and_dependency_files(self):
         source = self.prepare()
         paths = [".env", "nested/.env.production", "public/assets/local/model.atlas",
@@ -448,19 +530,19 @@ class ProjectTests(unittest.TestCase):
                 original.parent.mkdir(parents=True, exist_ok=True)
                 original.write_text("downloaded or private fixture\n")
                 with self.assertRaises(project.ProjectError):
-                    project.capture(self.root, [relative], "0002-private.patch")
-                self.assertFalse((self.root / "patches/0002-private.patch").exists())
+                    project.capture(self.root, [relative], "0002-Fix-private.patch")
+                self.assertFalse((self.root / "patches/0002-Fix-private.patch").exists())
                 self.assertFalse((self.root / "overlays" / relative).exists())
 
     def test_capture_cannot_overwrite_existing_patch_or_escape_source(self):
         self.prepare()
-        existing = (self.root / "patches/0001-marker.patch").read_bytes()
+        existing = (self.root / "patches/0001-Build-marker.patch").read_bytes()
         with self.assertRaisesRegex(project.ProjectError, "existing patches"):
-            project.capture(self.root, ["Dockerfile"], "0001-marker.patch")
-        self.assertEqual((self.root / "patches/0001-marker.patch").read_bytes(), existing)
+            project.capture(self.root, ["Dockerfile"], "0001-Build-marker.patch")
+        self.assertEqual((self.root / "patches/0001-Build-marker.patch").read_bytes(), existing)
         for relative in ("../outside", "/tmp/outside", ".git/config", "tools/../../outside", "tools\\outside"):
             with self.subTest(path=relative), self.assertRaises(project.ProjectError):
-                project.capture(self.root, [relative], "0002-escape.patch")
+                project.capture(self.root, [relative], "0002-Fix-escape.patch")
 
     def test_overlay_symlink_is_rejected_without_creating_source(self):
         external = self.base / "private-file"

@@ -31,7 +31,6 @@ export function AssetPrefetchHost() {
   const active = state.status === 'downloading' || state.status === 'preparing';
   const accepted = state.decision === 'accepted';
   const close = () => { if (firstVisit) assetPrefetch.decline(); setOpen(false); };
-  const percent = state.total ? Math.min(100, Math.round(state.completed / state.total * 100)) : 0;
   const actions = firstVisit || !accepted
     ? html`<${Button} variant="secondary" onClick=${close}>${t('按需加载')}<//>
         <${Button} variant="primary" disabled=${!state.supported || active} onClick=${() => { assetPrefetch.accept(); setOpen(false); }}>${t('同意并下载')}<//>`
@@ -41,10 +40,6 @@ export function AssetPrefetchHost() {
           ? html`<${Button} variant="primary" disabled=${state.clearing} onClick=${() => assetPrefetch.pause()}>${t('暂停下载')}<//>`
           : html`<${Button} variant="primary" disabled=${!state.supported} onClick=${() => assetPrefetch.resume()}>${t(state.status === 'error' ? '重试下载' : '继续下载')}<//>`}`;
   return html`
-    ${ready && !firstVisit ? html`<button type="button" class="asset-prefetch-launcher" data-testid="asset-prefetch-open"
-      onClick=${() => setOpen(true)} aria-label=${t('游戏资源下载')}>
-      <span>${t('资源下载')}</span>${active ? html`<small>${percent}%</small>` : null}
-    </button>` : null}
     <${Modal} open=${firstVisit || open} onClose=${close} title=${t('提前下载游戏资源')} micro="ASSET CACHE"
       width="6.8rem" class="asset-prefetch-modal" actions=${actions}>
       <div class="asset-prefetch" data-testid="asset-prefetch-dialog">
