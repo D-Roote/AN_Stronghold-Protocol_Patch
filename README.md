@@ -1,5 +1,7 @@
 # AN Stronghold Protocol 한국어 패치
 
+패치 저장소: [D-Roote/AN_Stronghold-Protocol_Patch](https://github.com/D-Roote/AN_Stronghold-Protocol_Patch)
+
 [Stronghold-Protocol](https://github.com/sganggs/Stronghold-Protocol)에 적용하는 한국어 교정과
 추가 수정, 빌드·운영 스크립트를 관리하는 독립 저장소입니다.
 원본 소스는 이 저장소의 현재 파일과 새 Git 이력에 포함하지 않습니다.
