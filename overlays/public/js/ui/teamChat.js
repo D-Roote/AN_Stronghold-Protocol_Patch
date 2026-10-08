@@ -159,7 +159,7 @@ export function MatchTools({ open, onToggle, children }) {
   const toggleRef = useRef(null);
   const menuRef = useRef(null);
   useEffect(() => { ensureTeamChatCss(); }, []);
-  useEffect(() => { if (open) menuRef.current?.querySelector('button:not(:disabled)')?.focus({ preventScroll: true }); }, [open]);
+  useLayoutEffect(() => { if (open) menuRef.current?.querySelector('button:not(:disabled)')?.focus({ preventScroll: true }); }, [open]);
   useDismissible({ rootRef, toggleRef, open, onToggle });
   const keys = (e) => {
     if (!open) {
