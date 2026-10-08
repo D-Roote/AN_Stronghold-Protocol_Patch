@@ -77,7 +77,8 @@ restart는 기존 컨테이너를 다시 시작한다. 새 이미지나 환경 �
 ## 추가 한글화와 기타 수정
 
 한국어 교정은 patches/ko-ui.json의 messages에 추가하거나 value를 수정한다.
-자체 추가 기능의 새 문구는 additions의 중국어 msgid와 한국어 문자열 쌍으로 관리한다.
+자체 추가 기능의 새 문구는 patches/ko-features.json의 additions에 중국어 msgid와 한국어 문자열
+쌍으로 관리한다. prepare는 ko-ui.json을 먼저 적용한 뒤 ko-features.json을 적용한다.
 messages는 원본 번역의 base를 검사하며, additions는 원본에 같은 키가 새로 생기면 값 충돌을 검사한다.
 각 항목의 base는 원본 문구, value는 적용할 한국어다. context가 포함된 msgid 키는 그대로 사용하고,
 placeholder를 보존한다. meta는 수정하는 _meta 필드만 포함한다.

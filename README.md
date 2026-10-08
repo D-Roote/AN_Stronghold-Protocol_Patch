@@ -12,7 +12,8 @@
 
 | 저장소 파일 | 역할 |
 | --- | --- |
-| [patches/ko-ui.json](patches/ko-ui.json) | 한국어 문구 교정 164개, 추가 기능 문구 41개와 충돌 검사 |
+| [patches/ko-ui.json](patches/ko-ui.json) | 원본 UI의 한국어 문구 교정 164개와 충돌 검사 |
+| [patches/ko-features.json](patches/ko-features.json) | 자체 추가 기능의 한국어 문구 41개와 충돌 검사 |
 | patches/0001-Build-*.patch 등 | 숫자 순서와 Build-/UI-/Feat- 분류를 가진 소스 수정 |
 | overlays/ | 원본에 추가할 자체 기능, 음성 검사기와 테스트 |
 | deploy/ | 운영·개발 설정 템플릿 및 검사 이미지 |

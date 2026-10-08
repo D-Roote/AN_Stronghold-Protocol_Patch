@@ -225,11 +225,16 @@ def reconstruct(root, pin, cache, destination):
     version = json.loads((destination / "package.json").read_text())["version"]
     if version != pin["version"]:
         raise ProjectError("Upstream package version differs from the lock")
-    ui_patch = json.loads((root / "patches/ko-ui.json").read_text(encoding="utf-8"))
-    relative = safe_relative(ui_patch["file"])
-    target = destination.joinpath(*relative.parts)
-    document = json.loads(target.read_text(encoding="utf-8"))
-    write_json(target, apply_ui_patch(document, ui_patch))
+    translation_patches = [root / "patches/ko-ui.json"]
+    feature_translations = root / "patches/ko-features.json"
+    if feature_translations.exists():
+        translation_patches.append(feature_translations)
+    for patch_file in translation_patches:
+        ui_patch = json.loads(patch_file.read_text(encoding="utf-8"))
+        relative = safe_relative(ui_patch["file"])
+        target = destination.joinpath(*relative.parts)
+        document = json.loads(target.read_text(encoding="utf-8"))
+        write_json(target, apply_ui_patch(document, ui_patch))
     for source in sorted((root / "overlays").rglob("*")):
         if source.is_symlink():
             raise ProjectError("Overlay symlinks are not supported")

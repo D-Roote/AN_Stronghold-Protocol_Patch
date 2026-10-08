@@ -50,6 +50,17 @@ class KoreanUITests(unittest.TestCase):
         self.assertEqual(result["new upstream message"], "새 번역")
         self.assertEqual(result["_meta"]["new upstream field"], {"revision": 3})
 
+    def test_separate_real_feature_translations_preserve_upstream_corrections(self):
+        layer = json.loads((REPOSITORY / "patches/ko-features.json").read_text(encoding="utf-8"))
+        corrected = project.apply_ui_patch(self.document, self.layer)
+        before = copy.deepcopy(corrected)
+        result = project.apply_ui_patch(corrected, layer)
+        for key, value in layer["additions"].items():
+            self.assertEqual(result[key], value)
+        for key, value in corrected.items():
+            self.assertEqual(result[key], value)
+        self.assertEqual(corrected, before)
+
     def test_changed_or_deleted_guarded_values_reject_without_mutating_input(self):
         first = next(iter(self.layer["messages"]))
         cases = [("messages", first, "changed"), ("messages", first, "deleted"),
@@ -195,6 +206,33 @@ class ProjectTests(unittest.TestCase):
             self.assertEqual(self.prepare(), source)
         self.assertEqual(korean.stat().st_mode & 0o777, 0o644)
         self.assertEqual(json.loads(korean.read_text())["hello"], "교정")
+
+    def test_prepare_applies_separate_feature_translations_and_rebuilds_after_edits(self):
+        layer = {"schemaVersion": 1, "language": "ko", "file": "public/i18n/ko.json",
+                 "additions": {"new feature": "새 기능"}}
+        path = self.root / "patches/ko-features.json"
+        project.write_json(path, layer)
+        source = self.prepare()
+        document = json.loads((source / "public/i18n/ko.json").read_text())
+        self.assertEqual(document["hello"], "교정")
+        self.assertEqual(document["new feature"], "새 기능")
+        layer["additions"]["new feature"] = "기능 수정"
+        project.write_json(path, layer)
+        self.assertEqual(self.prepare(), source)
+        document = json.loads((source / "public/i18n/ko.json").read_text())
+        self.assertEqual(document["new feature"], "기능 수정")
+        self.assertEqual(self.git(source, "status", "--porcelain"), "")
+
+    def test_feature_translation_collision_preserves_prepared_source(self):
+        source = self.prepare()
+        before = self.git(source, "rev-parse", "HEAD")
+        project.write_json(self.root / "patches/ko-features.json", {
+            "schemaVersion": 1, "language": "ko", "file": "public/i18n/ko.json",
+            "additions": {"hello": "추가 기능"}})
+        with self.assertRaisesRegex(project.ProjectError, "additions.hello"):
+            self.prepare()
+        self.assertEqual(self.git(source, "rev-parse", "HEAD"), before)
+        self.assertEqual(json.loads((source / "public/i18n/ko.json").read_text())["hello"], "교정")
 
     def test_initial_upstream_cache_bootstrap_checks_out_source_before_cleanliness_check(self):
         # A local bootstrap can reuse available objects, without network or real repository history.
