@@ -10,15 +10,16 @@
 
 | 저장소 파일 | 역할 |
 | --- | --- |
-| [patches/ko-ui.json](patches/ko-ui.json) | 한국어 문구 교정 164개와 기존 값 가드 |
+| [patches/ko-ui.json](patches/ko-ui.json) | 한국어 문구 교정 164개, 추가 기능 문구 41개와 충돌 검사 |
 | patches/*.patch | Docker 한국어 음성 빌드와 기타 소스 수정 |
-| overlays/ | 원본에 추가할 자체 파일: 음성 검사기와 테스트 |
+| overlays/ | 원본에 추가할 자체 기능, 음성 검사기와 테스트 |
 | deploy/ | 운영·개발 설정 템플릿 및 검사 이미지 |
 | [scripts/project.py](scripts/project.py) | 원본 준비, 업데이트, 패치 추출과 구성 CLI |
 | [scripts/deploy.py](scripts/deploy.py) | 에셋 추출, 최종 이미지 빌드와 Compose 구성 |
 | tests/ | 자체 구성 스크립트의 테스트 |
 
-원본 게임 기능·전투 로직·밸런스는 유지합니다. 일부 UI 기계번역은 아직 남아 있습니다.
+전투 로직·밸런스는 유지하며 기본 한국어, 에셋 사전 다운로드, 팀 텍스트 채팅과 접이식 메뉴를 추가합니다.
+일부 UI 기계번역은 아직 남아 있습니다.
 한국어 음성은 공개 KR 덤프를 사용하며, 해당 음성이 없는 오퍼레이터는 무음입니다.
 
 WSL Ubuntu/Linux, Python 3.10 이상, Git, Docker 및 Docker Compose가 필요합니다.

@@ -1,0 +1,57 @@
+/* Team text chat + one-button-wide tools. The existing emote artwork/wheel is unchanged. */
+.gm__corner.gm__corner--tools { flex-wrap: nowrap; width: auto; gap: max(.1rem, 5px); }
+.team-chat, .gm__tools { position: relative; flex: 0 0 auto; }
+.team-chat__toggle {
+  display: flex; align-items: center; justify-content: center; gap: max(.08rem, 5px);
+  width: max(.98rem, 64px); height: max(.56rem, 32px); padding: 0 max(.1rem, 6px);
+  background: rgba(8, 11, 10, .9); color: var(--text-md); border: 0;
+  font-size: max(.17rem, 13px); font-weight: 700; white-space: nowrap;
+}
+.team-chat__toggle .icon { width: max(.24rem, 18px); height: max(.24rem, 18px); fill: currentColor; }
+.team-chat__toggle:hover, .team-chat.is-open .team-chat__toggle { color: var(--mint-400); background: #152620; }
+.team-chat__panel {
+  position: absolute; left: 0; bottom: calc(100% + max(.1rem, 6px)); z-index: 16;
+  width: min(max(4.2rem, 290px), calc(100vw - 120px)); padding: max(.13rem, 9px);
+  background: rgba(8, 14, 12, .96); box-shadow: 0 5px 24px #0008;
+  font-size: max(.17rem, 13px); line-height: 1.5; color: var(--text-hi);
+}
+.team-chat__panel.is-feed-only { background: rgba(8, 14, 12, .76); box-shadow: none; pointer-events: none; }
+.team-chat__feed { display: flex; flex-direction: column; gap: max(.07rem, 4px); max-height: min(2.6rem, 34vh); overflow: auto; overflow-wrap: anywhere; }
+.team-chat__message { display: flex; align-items: baseline; gap: max(.12rem, 8px); }
+.team-chat__name { flex: 0 0 auto; max-width: 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--mint-400); font-weight: 700; }
+.team-chat__message.is-self .team-chat__name { color: var(--text-lo); }
+.team-chat__text { min-width: 0; white-space: pre-wrap; }
+.team-chat__empty { color: var(--text-lo); margin: 0; }
+.team-chat__form { margin-top: max(.14rem, 9px); }
+.team-chat__label { display: block; color: var(--text-md); margin-bottom: max(.06rem, 4px); font-size: max(.14rem, 12px); }
+.team-chat__compose { display: flex; gap: max(.08rem, 6px); }
+.team-chat__input {
+  flex: 1 1 0; min-width: 0; width: 0; height: max(.42rem, 36px); padding: 0 max(.1rem, 8px);
+  background: #14231d; color: var(--text-hi); border: 0; border-bottom: 1px solid var(--mint-700);
+  font: inherit; font-size: max(.17rem, 14px);
+}
+.team-chat__input::placeholder { color: var(--text-lo); }
+.team-chat__send { flex: 0 0 auto; padding: 0 max(.15rem, 10px); background: var(--mint-700); color: var(--text-hi); border: 0; font: inherit; font-weight: 700; }
+.team-chat__send:hover:not(:disabled) { background: var(--mint-500); color: #071910; }
+.team-chat__send:disabled { background: #20332a; color: var(--text-dim); cursor: default; }
+.team-chat__meta { display: flex; gap: 8px; justify-content: space-between; margin-top: max(.06rem, 5px); color: var(--text-lo); font-size: max(.12rem, 11px); }
+.team-chat__count { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.team-chat__count.is-long { color: var(--red-400, #ff8d8d); }
+.gm__tools-menu { position: absolute; bottom: calc(100% + max(.1rem, 6px)); left: 0; display: flex; flex-direction: column; gap: max(.06rem, 4px); padding: max(.06rem, 4px); background: rgba(8, 14, 12, .96); box-shadow: 0 5px 24px #0008; z-index: 17; }
+.gm__tools-menu .gm__gear { background: transparent; border: 0; }
+.gm__corner .gm__tools-toggle { width: max(.2rem, 20px); height: max(.56rem, 32px); padding: 0; border: 0; }
+.gm__corner .gm__tools-toggle .icon { width: max(.16rem, 14px); height: max(.24rem, 18px); transition: transform var(--t-fast); }
+.gm__tools.is-open .gm__tools-toggle .icon { transform: rotate(-90deg); color: var(--mint-400); }
+@media (pointer: coarse) {
+  .team-chat__toggle, .gm__corner .gm__tools-toggle, .gm__tools-menu .gm__gear { height: max(.56rem, 34px); }
+  .gm__tools-menu .gm__gear { width: max(.56rem, 34px); }
+  .gm__corner .gm__tools-toggle { width: max(.22rem, 24px); }
+}
+@media (max-width: 767px) {
+  .team-chat__panel { left: calc(-1 * max(1.51rem, 72px) - max(.1rem, 5px)); width: min(360px, calc(100vw - 30px)); }
+  .team-chat__feed { max-height: min(180px, 30vh); }
+}
+@media (max-width: 767px) and (pointer: coarse) {
+  .team-chat__panel { left: calc(-1 * max(1.51rem, 96px) - max(.1rem, 5px)); }
+}
+@media (prefers-reduced-motion: reduce) { .gm__tools-toggle .icon { transition: none; } }

@@ -35,6 +35,8 @@ class KoreanUITests(unittest.TestCase):
             self.assertEqual(result[key], change["value"])
         for key, change in self.layer["meta"].items():
             self.assertEqual(result["_meta"][key], change["value"])
+        for key, value in self.layer.get("additions", {}).items():
+            self.assertEqual(result[key], value)
         self.assertEqual(result["unchanged upstream text"], "원본 번역")
         for key, value in self.document["_meta"].items():
             if key not in self.layer["meta"]:
@@ -68,6 +70,25 @@ class KoreanUITests(unittest.TestCase):
     def test_already_corrected_upstream_values_are_accepted(self):
         result = project.apply_ui_patch(self.document, self.layer)
         self.assertEqual(project.apply_ui_patch(result, self.layer), result)
+
+    def test_feature_additions_reject_upstream_collisions_without_mutating_input(self):
+        layer = copy.deepcopy(self.layer)
+        layer["additions"] = {"new feature": "새 기능"}
+        result = project.apply_ui_patch(self.document, layer)
+        self.assertEqual(result["new feature"], "새 기능")
+        self.assertEqual(project.apply_ui_patch(result, layer), result)
+        document = dict(self.document, **{"new feature": "upstream replacement"})
+        before = copy.deepcopy(document)
+        with self.assertRaisesRegex(project.ProjectError, "additions.new feature"):
+            project.apply_ui_patch(document, layer)
+        self.assertEqual(document, before)
+
+    def test_feature_additions_reject_metadata_non_strings_and_guarded_keys(self):
+        for additions in [{"_meta": "wrong"}, {"label": {}}, [],
+                          {next(iter(self.layer["messages"])): "replacement"}]:
+            with self.subTest(additions=additions):
+                with self.assertRaises(project.ProjectError):
+                    project.apply_ui_patch(self.document, dict(self.layer, additions=additions))
 
 
 class ProjectTests(unittest.TestCase):

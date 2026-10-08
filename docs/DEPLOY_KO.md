@@ -48,7 +48,8 @@ deploy/env.example을 기준으로 .env가 생성되며, 최초 서비스 시작
 service/compose.yaml은 생성 파일이다. 템플릿 변경은 deploy/compose.yaml에 하고 setup으로 반영한다.
 빌드 context는 .build/Stronghold-Protocol의 절대 경로이며, 운영 에셋은 읽기 전용으로 마운트한다.
 운영 프로젝트 이름 stronghold, 127.0.0.1:3000 포트와 기존 Named Tunnel 연결을 유지한다.
-로컬 접속은 http://localhost:3000/?lang=ko이다.
+로컬 접속은 http://localhost:3000/이다. 최초 접속은 한국어로 시작하며 URL의 ?lang= 값이나
+기존 브라우저에 저장한 언어 선택이 있으면 그 값을 우선한다.
 
 준비 후에는 service/에서 Docker Compose로 관리한다.
 
@@ -76,6 +77,8 @@ restart는 기존 컨테이너를 다시 시작한다. 새 이미지나 환경 �
 ## 추가 한글화와 기타 수정
 
 한국어 교정은 patches/ko-ui.json의 messages에 추가하거나 value를 수정한다.
+자체 추가 기능의 새 문구는 additions의 중국어 msgid와 한국어 문자열 쌍으로 관리한다.
+messages는 원본 번역의 base를 검사하며, additions는 원본에 같은 키가 새로 생기면 값 충돌을 검사한다.
 각 항목의 base는 원본 문구, value는 적용할 한국어다. context가 포함된 msgid 키는 그대로 사용하고,
 placeholder를 보존한다. meta는 수정하는 _meta 필드만 포함한다.
 
@@ -108,7 +111,7 @@ prepare는 원본 값이 base 또는 이미 교정된 value와 같을 때만 적
 ~~~bash
 python3 scripts/project.py prepare
 # .build/Stronghold-Protocol 안의 필요한 소스 파일 편집
-python3 scripts/project.py capture --path server/index.js --name 0002-my-change.patch
+python3 scripts/project.py capture --path server/index.js --name 0004-my-change.patch
 python3 scripts/project.py prepare
 ~~~
 
@@ -118,6 +121,26 @@ capture는 지정한 파일만 보존하며, 관계없는 수정이 남아 있�
 생성 소스의 보존되지 않은 수정을 덮어쓸 때만 prepare --force를 명시적으로 사용한다.
 원본에 overlay와 같은 파일이 추가되면 충돌로 중단하여 병합 여부를 검토한다.
 다운로드 에셋, 환경 설정과 생성 manifest는 capture하지 않는다.
+
+## 사용자 에셋 다운로드와 팀 채팅
+
+처음 접속하면 에셋 사전 다운로드 동의를 묻는다. 현재 전체 대상은 약 567MB이며 이미지·모델·
+KR 음성·로컬 폰트를 브라우저에 저장한다. 동의하면 게임을 이용하는 동안 두 파일씩 백그라운드로
+다운로드한다. 선택은 해당 브라우저에 저장하며, 거절해도 필요할 때 에셋을 불러와 플레이할 수 있다.
+
+제목·대기실의 에셋 다운로드 버튼이나 설정의 에셋 다운로드에서 진행률 확인, 일시정지·재개·
+재시도·캐시 삭제를 할 수 있다. 다운로드한 에셋은 이후 요청에서 재사용하며, 앱 코드·게임 데이터·
+API는 이 캐시에 넣지 않는다. 에셋 버전이 바뀌면 이전 캐시를 정리하고 새 버전으로 준비한다.
+브라우저의 저장 공간 정리로 캐시가 삭제되면 다시 다운로드해야 한다. HTTPS 또는 localhost에서
+브라우저 캐시 기능을 사용할 수 있다.
+
+협동 게임의 좌하단은 교류·채팅·> 순서다. 교류의 기존 이모티콘 기능을 유지하며,
+>를 펼치면 설정·매뉴얼·전체화면 버튼이 세로로 나타난다. 채팅은 같은 방의 실제 팀원에게만
+전달되며 관전자·다른 방·봇은 대상에 포함하지 않는다. 메시지는 200자까지, 전송 간격은 1초이고
+화면에서 10초 후 사라진다. 연결이 끊긴 동안 쓴 메시지는 자동 전송하지 않는다.
+서버·브라우저 저장소·전투 리플레이에 채팅 기록을 보관하지 않는다.
+
+추가 기능 설계와 작업 기록은 .cache/feature-work/에 작성하며 Git에서 제외한다.
 
 ## 검사와 개발 서버
 

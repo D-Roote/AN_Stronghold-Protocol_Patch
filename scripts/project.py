@@ -120,6 +120,19 @@ def apply_ui_patch(document, patch):
                 conflicts.append(f"{section}.{key}")
             else:
                 target[key] = change["value"]
+    # New feature labels belong to this patch layer, not to the upstream translation.
+    additions = patch.get("additions", {})
+    if not isinstance(additions, dict):
+        raise ProjectError("Invalid UI patch section: additions")
+    for key, value in additions.items():
+        if not isinstance(key, str) or not key or key.startswith("_") or not isinstance(value, str):
+            raise ProjectError(f"Invalid UI patch addition: {key}")
+        if key in patch.get("messages", {}):
+            raise ProjectError(f"UI patch addition overlaps a guarded message: {key}")
+        if key in result and result[key] != value:
+            conflicts.append(f"additions.{key}")
+        else:
+            result[key] = value
     if conflicts:
         raise ProjectError("Upstream Korean text changed; review patch guards: " +
                            ", ".join(conflicts[:20]))

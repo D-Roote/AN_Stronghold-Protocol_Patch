@@ -1,0 +1,384 @@
+diff --git a/public/i18n/en.json b/public/i18n/en.json
+index bbf29fcf5ecf3411aa8e17ba4d0d343a1ec49d0c..0cbc5c87322bb70c1b73b62bc2ebe34831b9fb2e 100644
+--- a/public/i18n/en.json
++++ b/public/i18n/en.json
+@@ -1055,5 +1055,46 @@
+   "选择「{name}」的朝向": "Choose {name}'s facing",
+   "选择朝向": "Choose a facing",
+   "朝向：{dir}": "Facing: {dir}",
+-  "开发版 · 不稳定，请勿用于公开服务器": "Development build · unstable, not for public servers"
++  "开发版 · 不稳定，请勿用于公开服务器": "Development build · unstable, not for public servers",
++  "队伍聊天": "Team chat",
++  "聊天": "Chat",
++  "连接断开，暂时无法发送聊天": "Disconnected. Chat is unavailable.",
++  "请等待1秒后再发送": "Wait 1 second before sending again",
++  "请输入1至200字的聊天内容": "Enter a message of 1–200 characters",
++  "仅合作队伍成员可以聊天": "Only co-op teammates can chat",
++  "聊天发送失败，请重试": "Chat failed to send. Try again.",
++  "消息将在10秒后消失": "Messages disappear after 10 seconds",
++  "输入消息，Enter发送": "Message · Enter to send",
++  "游戏工具": "Game menu",
++  "收起游戏工具": "Collapse game menu",
++  "展开游戏工具": "Expand game menu",
++  "尚未开始": "Not started",
++  "正在准备": "Preparing",
++  "正在下载": "Downloading",
++  "已暂停": "Paused",
++  "下载完成": "Download complete",
++  "部分资源未完成": "Some assets are incomplete",
++  "此浏览器无法保存资源缓存": "This browser cannot store asset caches",
++  "按需加载": "Load when needed",
++  "同意并下载": "Accept and download",
++  "清除资源缓存": "Clear asset cache",
++  "暂停下载": "Pause download",
++  "重试下载": "Retry download",
++  "继续下载": "Resume download",
++  "游戏资源下载": "Game asset download",
++  "资源下载": "Asset download",
++  "提前下载游戏资源": "Download game assets in advance",
++  "是否提前下载游戏资源？": "Download game assets in advance?",
++  "预计约 {size}，包含图片、模型、语音和本地字体。": "About {size}, including images, models, voices and local fonts.",
++  "同意后会在后台下载，游戏仍可照常使用。选择按需加载也能正常游戏。": "With your consent, assets download in the background while you play. You can also play normally with on-demand loading.",
++  "资源保存在此浏览器中，可暂停、继续或清除。浏览器清理缓存后需要重新下载。": "Assets stay in this browser. Pause, resume or clear them any time. Clearing browser data requires another download.",
++  "此浏览器无法保存资源缓存，游戏将继续按需加载。": "This browser cannot store asset caches. The game will load assets when needed.",
++  "下载进度": "Download progress",
++  "已保存 {done} / {total} 个文件": "Saved {done} / {total} files",
++  "本次下载 {size} · 已有缓存 {count} 个": "Downloaded {size} · {count} already cached",
++  "{count} 个文件下载失败，可稍后重试。": "{count} files failed to download. You can retry later.",
++  "浏览器存储空间不足，下载已停止。可清除资源缓存后重试，或继续按需加载。": "Browser storage is full. Download paused. Clear the asset cache and retry, or keep loading assets on demand.",
++  "下载暂时未完成。已保存的资源会保留，游戏仍可使用。": "Download is incomplete. Saved assets remain available and you can keep playing.",
++  "发送": "Send",
++  "发送中…": "Sending…"
+ }
+diff --git a/public/index.html b/public/index.html
+index 82a085e055a4775a3bb96d78627f15d1e95cbe70..8008741644aecdcd5951ad5e21f7d0036da75d22 100644
+--- a/public/index.html
++++ b/public/index.html
+@@ -39,6 +39,8 @@
+   <link rel="stylesheet" href="/css/screens/guide.css" />
+   <link rel="stylesheet" href="/css/screens/loadout.css" />
+   <link rel="stylesheet" href="/css/emotes.css" />
++  <link rel="stylesheet" href="/css/team-chat.css" />
++  <link rel="stylesheet" href="/css/asset-prefetch.css" />
+   <link rel="stylesheet" href="/css/devices.css" />
+ 
+   <script type="importmap">
+diff --git a/public/js/main.js b/public/js/main.js
+index 5b109e9170deb2d0dd73682032bfc821f49b3c2f..3eac5cc42273d17f2f9a27341e028bf9a8e844f9 100644
+--- a/public/js/main.js
++++ b/public/js/main.js
+@@ -45,6 +45,8 @@ import { LobbyScreen, rememberRoom, parseRoomParam } from './screens/lobby.js';
+ import { RoomScreen } from './screens/room.js';
+ import { GameScreen } from './screens/game.js';
+ import { installAudio } from './audio.js';
++import { installTeamChat } from './chat.js';
++import { AssetPrefetchHost } from './ui/assetPrefetch.js';
+ import { settingsStore } from './ui/settings.js';
+ import { GuideHost } from './ui/guide.js';
+ import { installDeviceSupport } from './ui/device.js';
+@@ -287,6 +289,7 @@ function App() {
+     <${UiHosts} />
+     <${GuideHost} />
+     <${LoadoutHost} />
++    <${AssetPrefetchHost} />
+   </div>`;
+ }
+ 
+@@ -339,6 +342,7 @@ async function boot() {
+   }));
+ 
+   wireNet();
++  installTeamChat({ net, store });
+   installLoadoutSync({ net });
+   installOwnershipSync({ net });
+   installDiySync({ net });
+diff --git a/public/js/net.js b/public/js/net.js
+index b921a4449390ca1b5937123f6945c77da985e76d..75672073770fd8ee06580b766174de7e62e7e870 100644
+--- a/public/js/net.js
++++ b/public/js/net.js
+@@ -421,7 +421,7 @@ export class Net {
+    * session to send it on, BAD_MSG when it fails shared/protocol.js validation locally.
+    * @param {string} t message type (C2S)
+    * @param {object} [fields]
+-   * @param {{timeout?: number}} [opts]
++   * @param {{timeout?: number, queue?: boolean}} [opts] queue:false fails immediately unless sent online
+    * @returns {Promise<any>}
+    */
+   request(t, fields = {}, opts = {}) {
+@@ -437,7 +437,7 @@ export class Net {
+       }
+       // Queue while a session is being (re)established; fail fast when none can come.
+       const establishing = this.status === 'connecting' || this.status === 'handshaking' || this.status === 'reconnecting';
+-      if (this.status !== 'online' && !(establishing && this.name && !this._manualClose)) {
++      if (this.status !== 'online' && !(opts.queue !== false && establishing && this.name && !this._manualClose)) {
+         reject(new NetError(this._manualClose ? 'CLOSED' : 'OFFLINE'));
+         return;
+       }
+@@ -454,6 +454,11 @@ export class Net {
+       }, timeout);
+       this._pending.set(rid, entry);
+       if (this.status === 'online') entry.sent = this._sendRaw(msg);
++      if (!entry.sent && opts.queue === false) {
++        this._pending.delete(rid);
++        this._clearEntryTimer(entry);
++        reject(new NetError('OFFLINE'));
++      }
+     });
+   }
+ 
+diff --git a/public/js/screens/game.js b/public/js/screens/game.js
+index 52a79eb0978f32d3412e3d860a65c762acf38df7..d0682d2849b3d83dc2a5b629248572becba7b6d3 100644
+--- a/public/js/screens/game.js
++++ b/public/js/screens/game.js
+@@ -79,6 +79,8 @@ import { ChoiceOverlay } from '../ui/choiceOverlay.js';
+ import { EnemyDrawer } from '../ui/enemyDrawer.js';
+ import { Ticker } from '../ui/ticker.js';
+ import { EmoteWheel } from '../ui/emotes.js';
++import { TeamChat, MatchTools } from '../ui/teamChat.js';
++import { canTeamChat } from '../chat.js';
+ import { EffectsList } from '../ui/effectsList.js';
+ import { CombatHud } from '../ui/combatHud.js';
+ import { SettingsModal, settingsStore } from '../ui/settings.js';
+@@ -154,6 +156,7 @@ function MatchScreen() {
+   const myId = useStore((s) => s.me.playerId);
+   const conn = useStore((s) => s.connection, shallowEqual);
+   const emotes = useStore((s) => s.emotes);
++  const room = useStore((s) => s.room);
+   const roomSolo = useStore((s) => s.room?.mode === 'solo');
+   const spectator = useStore((s) => isSpectating(s.room, s.me.playerId));
+   const gd = useGameData();
+@@ -172,6 +175,8 @@ function MatchScreen() {
+   const [collapsed, setCollapsed] = useState(false);
+   const [rewardMin, setRewardMin] = useState(false);
+   const [emoteOpen, setEmoteOpen] = useState(false);
++  const [chatOpen, setChatOpen] = useState(false);
++  const [toolsOpen, setToolsOpen] = useState(false);
+   const [settingsOpen, setSettingsOpen] = useState(false);
+   const [exitOpen, setExitOpen] = useState(false);
+   const [drag, setDrag] = useState(null);                // { uid, kind, id } while dragging a piece
+@@ -197,6 +202,8 @@ function MatchScreen() {
+   const mode = phaseMode(phase);
+   const combat = isCombatPhase(phase);
+   const solo = roomSolo || String(pub?.modeId || '').includes('single');
++  const chatAvailable = !solo && !spectator && canTeamChat(room, myId);
++  useEffect(() => { if (!chatAvailable) setChatOpen(false); }, [chatAvailable]);
+   const players = sortedPlayers(pub);
+   const meP = players.find((p) => p.playerId === myId) || null;
+   // a spectator seat watches like an eliminated player (it has no m.private and no row in m.public)
+@@ -271,7 +278,7 @@ function MatchScreen() {
+     getChess: (id) => { const c = gd.chess(id); return ownDiyRecord(c, priv, { chess: data.get('chess'), backups: data.get('backups') }) || c; },
+     getToken: gd.token, getItem: gd.item, getEffect: gd.effect, backups: gd.backups,
+   }), [priv, pub?.stageId, editable, gd.ready, deployField]);
+-  live.current = { pub, priv, field, editable, placeCtx, watching, watchWho, home, myId, alive, spectator, detail, drawer, bondOpen, emoteOpen, settingsOpen, exitOpen, drag, facing, sel, selBusy, pen, collapsedNow: collapsed, localDone: false, canPause: false, paused };
++  live.current = { pub, priv, field, editable, placeCtx, watching, watchWho, home, myId, alive, spectator, detail, drawer, bondOpen, emoteOpen, chatOpen, toolsOpen, settingsOpen, exitOpen, drag, facing, sel, selBusy, pen, collapsedNow: collapsed, localDone: false, canPause: false, paused };
+ 
+   // ---- camera: every request goes through setCam, which remembers it for the pen's way back -----------------------
+   // the own prep board: the normal board, or — in the prep of a boss round — the player's half of the boss field
+@@ -1153,9 +1160,11 @@ function MatchScreen() {
+       const act = shortcutFor(e, settingsStore.get().keys); // the player's key map (设置 → 快捷键)
+       const L = live.current;
+       // dialogs / the guide own the keyboard; behind the 本局信息 / 敌方情报 drawer only Esc (closing it) acts
+-      if (shortcutBlocked(act, { modal: !!document.querySelector('.modal, .guide'), drawer: !!L.drawer })) return;
++      if (shortcutBlocked(act, { modal: !!document.querySelector('.modal, .guide'), drawer: !!L.drawer || L.chatOpen || L.toolsOpen })) return;
+       if (act === 'escape') {
+-        if (L.emoteOpen) setEmoteOpen(false);
++        if (L.chatOpen) setChatOpen(false);
++        else if (L.toolsOpen) setToolsOpen(false);
++        else if (L.emoteOpen) setEmoteOpen(false);
+         else if (L.pen && !L.detail) togglePenRef.current(false);
+         else if (L.bondOpen) setBondOpen(null);
+         else if (L.detail) setDetail(null);
+@@ -1374,11 +1383,15 @@ function MatchScreen() {
+ 
+       <${Ticker} />
+ 
+-      <div class="gm__corner">
++      <div class="gm__corner gm__corner--tools">
+         ${spectator ? null : html`<${EmoteWheel} open=${emoteOpen} onToggle=${setEmoteOpen} onSend=${(id) => actions.emote(id)} disabled=${conn.status !== 'online'} />`}
+-        <button type="button" class="gm__gear" aria-label=${t('设置')} title=${t('设置')} onClick=${() => setSettingsOpen(true)}><${GIcon} name="gear" /></button>
+-        <button type="button" class="gm__gear gm__guide" aria-label=${t('玩法说明')} title=${t('玩法说明')} onClick=${() => openGuide(0)}><${Icon} name="book" /></button>
+-        <${FullscreenButton} class="gm__gear gm__fs" />
++        ${chatAvailable ? html`<${TeamChat} key=${room.code} playerId=${myId} online=${conn.status === 'online'} open=${chatOpen}
++          onToggle=${(open) => { setChatOpen(open); if (open) { setEmoteOpen(false); setToolsOpen(false); } }} />` : null}
++        <${MatchTools} open=${toolsOpen} onToggle=${(open) => { setToolsOpen(open); if (open) { setChatOpen(false); setEmoteOpen(false); } }}>
++          <button type="button" class="gm__gear gm__settings" aria-label=${t('设置')} title=${t('设置')} onClick=${() => setSettingsOpen(true)}><${GIcon} name="gear" /></button>
++          <button type="button" class="gm__gear gm__guide" aria-label=${t('玩法说明')} title=${t('玩法说明')} onClick=${() => openGuide(0)}><${Icon} name="book" /></button>
++          <${FullscreenButton} class="gm__gear gm__fs" />
++        </${MatchTools}>
+       </div>
+ 
+       ${drawer ? html`<${EnemyDrawer} tab=${drawer} onTab=${setDrawer} pub=${pub} priv=${priv} onClose=${() => setDrawer(null)}
+diff --git a/public/js/ui/settings.js b/public/js/ui/settings.js
+index d7db406d11070268f379c23f1615acae7faa4582..63473e8c9b4cc8938a8e2d6544201b5a01861f60 100644
+--- a/public/js/ui/settings.js
++++ b/public/js/ui/settings.js
+@@ -11,6 +11,7 @@ import { createStore, useStore, loadPref, savePref } from '../store.js';
+ import { sanitizeSettings, HOTKEY_ACTIONS, DEFAULT_HOTKEYS, hotkeyLabel, rebindHotkey, isDefaultHotkeys, captureHotkey } from './gameLogic.js';
+ import { audio } from '../audio.js';
+ import { openGuide } from './guide.js';
++import { openAssetPrefetchControls } from '../assetPrefetch.js';
+ import { detectFeatures } from './device.js';
+ import { LangToggle, machineTranslationNote } from './lang.js';
+ import { t, tc, N_ } from '../../../shared/i18n.js';
+@@ -162,6 +163,10 @@ export function SettingsModal({ open, onClose }) {
+         <${LangToggle} class="set-lang" />
+       </div>
+       ${mtNote ? html`<p class="set-hint set-lang-note" data-testid="lang-mt-note">${mtNote}</p>` : null}
++      <div class="set-row">
++        <span class="set-row__label">${t('游戏资源下载')}<${MicroLabel}>ASSETS<//></span>
++        <${Button} variant="secondary" data-testid="settings-asset-download" onClick=${() => { onClose(); openAssetPrefetchControls(); }}>${t('资源下载')}<//>
++      </div>
+       <${Slider} label=${t('背景音乐')} micro="BGM" icon="play" value=${s.bgm} onInput=${(v) => updateSettings({ bgm: v })} />
+       <${Slider} label=${t('干员语音')} micro="VOICE" icon="mic" value=${s.voice} onInput=${(v) => updateSettings({ voice: v })} />
+       <${Slider} label=${t('音效')} micro="SFX" icon="signal" value=${s.sfx}
+diff --git a/server/lobby.js b/server/lobby.js
+index 0e0530f28d3c3ab6687c18266074df6f4aac621e..3d9255c62dcc6beaaca063eb1fc45acc0ea8d024 100644
+--- a/server/lobby.js
++++ b/server/lobby.js
+@@ -101,6 +101,7 @@ import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
+ import { getData as defaultGetData, lookup } from './data.js';
+ import { Match as DefaultMatch } from './match/Match.js';
+ import { KITTED_CHARS } from './sim/content/kits/index.js';
++import { CHAT_COOLDOWN_MS, normalizeChatText } from '../shared/chat.js';
+ 
+ /** Room code alphabet: uppercase letters without I and O (and no digits, so no 0/1). */
+ export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+@@ -164,6 +165,7 @@ export class Room {
+     /** @type {{ live: boolean, ended: boolean, disposed: boolean, match: any } | null} */
+     this.matchCtx = null;
+     this.matchCount = 0;
++    this.chatSeq = 0;
+     /** @type {any} summary passed to onEnd by the last match */
+     this.lastSummary = null;
+     /**
+@@ -309,6 +311,7 @@ export class Lobby {
+       case 'room.create': return this.create(session, msg);
+       case 'room.join': return this.join(session, msg);
+       case 'room.leave': return this.leave(session);
++      case 'room.chat': return this.chat(session, msg);
+       case 'room.ready': return this.ready(session, msg);
+       case 'room.setDifficulty': return this.setDifficulty(session, msg);
+       case 'room.addBot': return this.addBot(session);
+@@ -368,6 +371,28 @@ export class Lobby {
+   // room.* handlers
+   // ---------------------------------------------------------------------------------------------------
+ 
++  /** Relay only to active human teammates. Nothing is retained or passed to the match/replay. */
++  chat(session, msg) {
++    const room = this.roomOf(session);
++    if (!room || room.disposed) return fail(ERR.NOT_IN_ROOM);
++    const seat = room.seatOf(session.playerId);
++    if (!seat) return fail(ERR.SPECTATOR);
++    if (room.mode !== 'coop' || seat.isBot || seat.left || !seat.connected || !session.connected) return fail(ERR.NOT_IN_ROOM);
++    const text = normalizeChatText(msg.text);
++    if (text === null) return fail(ERR.BAD_MSG);
++    const now = this.now();
++    if (now - session.lastChatAt < CHAT_COOLDOWN_MS) return fail(ERR.RATE);
++    session.lastChatAt = now;
++    // Never copy client-supplied author, token, room or timestamp fields.
++    const frame = encode({ t: 'room.chat', code: room.code, seq: ++room.chatSeq, playerId: seat.playerId, name: seat.name, text, at: now });
++    for (const teammate of room.activeHumans()) {
++      if (!teammate.connected) continue;
++      const peer = this.registry.byId(teammate.playerId);
++      if (peer?.connected && peer.roomCode === room.code) sendRaw(peer.ws, frame);
++    }
++    return OK;
++  }
++
+   create(session, { mode, difficulty }) {
+     const cur = this.roomOf(session);
+     if (cur && cur.match) return fail(ERR.ROOM_STARTED, 'leave your running match first');
+diff --git a/server/net.js b/server/net.js
+index 341c433400b1f452bbfffa67ccbdf5f753d02376..191d73ef94ced07e7f7c8ff2ba2b048a4ec5147e 100644
+--- a/server/net.js
++++ b/server/net.js
+@@ -107,6 +107,8 @@ export class Session {
+     this.pendingResult = null;
+     /** @type {number} ms epoch of the last full match resync (lobby-owned; throttles repeated hellos) */
+     this.resyncAt = -Infinity;
++    /** Team-chat rate limit follows this identity across sockets, rooms and matches. */
++    this.lastChatAt = -Infinity;
+     /** @type {Record<string, { skill: number, module: string|null }> | null} checked operator loadout (lobby-owned, DESIGN §16) */
+     this.loadout = null;
+     /** @type {readonly string[] | null} checked not-owned chess ids (干员持有, lobby-owned, 0.2.0 补位) */
+diff --git a/shared/protocol.js b/shared/protocol.js
+index 19282a2aa7b3f9afa36d367b74fe653393ad70dc..53a1d290d3fd6abca48ab50a6d8b64b2684c388b 100644
+--- a/shared/protocol.js
++++ b/shared/protocol.js
+@@ -4,6 +4,7 @@
+ import { DIFFICULTIES, NAME_MAX_LEN, ROOM_CODE_LEN, MAX_SEATS, EMOTES, GEO } from './constants.js';
+ import { isDroppableChess } from './standIn.js';
+ import { diySlotIds, validateDiyPicks } from './diy.js';
++import { normalizeChatText } from './chat.js';
+ 
+ // ---- tiny validators -------------------------------------------------------
+ const isInt = (v, lo = -Infinity, hi = Infinity) => Number.isInteger(v) && v >= lo && v <= hi;
+@@ -323,6 +324,7 @@ export const C2S = {
+   'room.create': { mode: (v) => v === 'solo' || v === 'coop', difficulty: (v) => DIFFICULTIES.includes(v) },
+   'room.join': { code: (v) => isStr(v, ROOM_CODE_LEN + 2) && /^[A-Za-z0-9]+$/.test(v) },
+   'room.leave': {},
++  'room.chat': { text: (v) => normalizeChatText(v) !== null },
+   'room.ready': { ready: isBool },
+   'room.setDifficulty': { difficulty: (v) => DIFFICULTIES.includes(v) },
+   'room.addBot': {},
+@@ -396,7 +398,7 @@ export const C2S = {
+ // Server → client message types (documentation + client dispatch table keys).
+ export const S2C = [
+   'welcome', 'ok', 'error', 'pong',
+-  'room.state', 'room.closed',
++  'room.state', 'room.closed', 'room.chat',
+   'm.public', 'm.private', 'm.field', 'm.toast', 'm.ticker', 'm.emote', 'm.result',
+   // m.unitStats { seq, round, units: [unitStatsEntry] } — the answer to g.unitStats (the requester only)
+   'm.unitStats',
+diff --git a/test/ui/i18n.e2e.test.js b/test/ui/i18n.e2e.test.js
+index dfd76425ae05ca384bfe5b300c41b6de41a83de1..387348e1499394ba94b91fa863e298467eeb8715 100644
+--- a/test/ui/i18n.e2e.test.js
++++ b/test/ui/i18n.e2e.test.js
+@@ -2,12 +2,12 @@
+ //
+ //   SP_E2E=1 node --test test/ui/i18n.e2e.test.js
+ //
+-// The title screen opens in Chinese; 中文 | English → English in place (no reload): the title, the start button, the
++// The title screen opens in Korean; switch to English in place (no reload): the title, the start button, the
+ // connection line, <html lang>, the tab title; the choice is kept across a reload (localStorage sp.pref.lang) and the
+ // game-data overlay (data/i18n/en.json) is applied; `?lang=zh` switches back and leaves the address bar. Language packs
+ // (docs/I18N.md "Adding a language", docs/PACKS.md): a pack file dropped into public/i18n/ and a pack folder dropped
+ // into packs/ while the server runs show in the menu and switch, with English filling what they lack; a removed pack
+-// sends a stored choice back to Chinese. The shipped Japanese, Korean and Traditional Chinese packs (the owner's decisions of
++// sends a stored choice back to Korean. The shipped Japanese, Korean and Traditional Chinese packs (the owner's decisions of
+ // 2026-10-07) switch to their official game texts and their own UI strings (what a pack lacks shows its fallback: English
+ // for ja / ko, the Simplified Chinese for zh-TW); a pack marked `machineTranslated` says so in 设置 (none in Chinese).
+ // With more than four languages the menu is a list (ui/lang.js SEGMENTED_MAX): the helpers read and pick either form.
+@@ -71,8 +71,9 @@ describe('language switch on the title screen', { skip: !ENABLED && 'set SP_E2E=
+   /** A game text of a shipped pack's overlay (data/i18n/<code>.json; a leaf is a string or { _s }). */
+   const gameText = (code) => { const v = JSON.parse(fs.readFileSync(path.join(ROOT, `data/i18n/${code}.json`), 'utf8')).files.config.modes.mode_multi_abyss.name; return typeof v === 'string' ? v : v._s; };
+ 
+-  test('中文 by default; English in place, kept across a reload; ?lang=zh back to Chinese', async () => {
++  test('Korean by default; English in place, kept across a reload; ?lang=zh back to Chinese', async () => {
+     const page = await browser.newPage();
++    await page.evaluateOnNewDocument(() => localStorage.setItem('sp.pref.assetDownload', JSON.stringify({ decision: 'declined' })));
+     await page.setViewport({ width: 1600, height: 900 });
+     const problems = [];
+     page.on('console', (m) => { if (m.type() === 'error') problems.push(`console: ${m.text()}`); });
+@@ -80,9 +81,9 @@ describe('language switch on the title screen', { skip: !ENABLED && 'set SP_E2E=
+     page.on('response', (r) => { if (r.status() >= 400 && !/fonts\.(googleapis|gstatic)/.test(r.url())) problems.push(`http ${r.status()}: ${r.url()}`); });
+     await page.goto(`${base}/`, { waitUntil: 'networkidle0' });
+     await page.waitForSelector('.title-screen [data-testid="lang-toggle"]');
+-    assert.equal(await text(page, '.title-cn'), '卫戍协议：盟约');
+-    assert.equal(await text(page, '.title-login .btn--primary'), '开始');
+-    assert.equal(await page.evaluate(() => document.documentElement.lang), 'zh-CN');
++    assert.equal(await text(page, '.title-cn'), uiText('ko', '卫戍协议：盟约'));
++    assert.equal(await text(page, '.title-login .btn--primary'), uiText('ko', '开始'));
++    assert.equal(await page.evaluate(() => document.documentElement.lang), 'ko');
+ 
+     assert.deepEqual(await menu(page), SHIPPED, 'the shipped languages');
+     await pick(page, 'en');
+@@ -149,7 +150,7 @@ describe('language switch on the title screen', { skip: !ENABLED && 'set SP_E2E=
+       await sleep(1100);
+       await page.reload({ waitUntil: 'networkidle0' });
+       await page.waitForSelector('.title-screen .title-cn');
+-      assert.equal(await text(page, '.title-cn'), '卫戍协议：盟约', 'the stored pack is gone: Chinese');
++      assert.equal(await text(page, '.title-cn'), uiText('ko', '卫戍协议：盟约'), 'the stored pack is gone: Korean');
+       assert.deepEqual(await menu(page), SHIPPED);
+       assert.deepEqual(problems, []);
+     } finally {
