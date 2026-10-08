@@ -524,11 +524,13 @@ def rollback(root, pin=None, source=None, *, backup=None):
 
 
 def setup(root, pin, source, *, archive=None, image=None, start=False):
-    """Prepare assets/image/runtime configuration; launch only when explicitly selected."""
+    """Finish initial setup so the generated service can be managed with Docker Compose."""
     prepared = assets(root, pin, archive=archive)
     built = build(root, pin, source, image=image)
     configured = configure(root, pin, source, image=image)
-    result = {"assets": prepared, "build": built, "configuration": configured}
+    _, service, _ = _paths(root)
+    result = {"assets": prepared, "build": built, "configuration": configured,
+              "service_directory": str(service), "compose": str(service / "compose.yaml")}
     if start:
         result["service"] = up(root, pin, source)
         result["verification"] = verify(root, pin, source)

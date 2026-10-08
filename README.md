@@ -15,7 +15,7 @@
 | overlays/ | 원본에 추가할 자체 파일: 음성 검사기와 테스트 |
 | deploy/ | 운영·개발 설정 템플릿 및 검사 이미지 |
 | [scripts/project.py](scripts/project.py) | 원본 준비, 업데이트, 패치 추출과 구성 CLI |
-| [scripts/deploy.py](scripts/deploy.py) | 에셋 추출, 이미지 빌드, 서비스 운영 |
+| [scripts/deploy.py](scripts/deploy.py) | 에셋 추출, 최종 이미지 빌드와 Compose 구성 |
 | tests/ | 자체 구성 스크립트의 테스트 |
 
 원본 게임 기능·전투 로직·밸런스는 유지합니다. 일부 UI 기계번역은 아직 남아 있습니다.
@@ -25,24 +25,30 @@ WSL Ubuntu/Linux, Python 3.10 이상, Git, Docker 및 Docker Compose가 필요�
 호스트 Node.js 설치는 필요하지 않습니다.
 
 ~~~bash
-# 지정한 원본 준비 → 한국어 패치 적용
-python3 scripts/project.py prepare
-
-# 로컬 에셋 검증/추출 → 서비스 설정 생성 → KR 이미지 빌드
+# 원본 받기·한국어 패치·로컬 에셋·최종 KR 이미지·Compose 설정까지 자동 준비
 python3 scripts/project.py setup
 
-# 구성·음성·게임 검증 후 서비스 시작
-python3 scripts/project.py up
-python3 scripts/project.py verify
+# 이후 서비스는 Docker Compose로 관리
+cd service
+docker compose up -d
+docker compose ps
 ~~~
 
-처음 설치하면 service/.env에 Tunnel token을 직접 입력합니다.
-기존 설치의 비밀값은 스크립트가 보존합니다. 실제 운영 폴더, 원본 캐시와 생성 소스는 Git에서 제외합니다.
+별도로 prepare를 먼저 실행할 필요가 없습니다. 처음 설치하면 시작 전에 service/.env에
+Tunnel token을 입력합니다. 기존 비밀값은 보존하며 .env 권한은 600으로 유지합니다.
+실제 운영 폴더, 원본 캐시와 생성 소스는 Git에서 제외합니다.
 
 ~~~bash
-python3 scripts/project.py status
-python3 scripts/project.py down
+# service/ 안에서 실행
+docker compose logs -f
+docker compose restart
+docker compose down
 ~~~
+
+패치나 원본 버전을 변경하면 프로젝트 루트에서 setup을 다시 실행합니다. 변경한 패치를 자동으로
+재적용하고 새 이미지를 빌드하므로, 이후 service/에서 docker compose up -d로 반영합니다.
+docker compose build도 준비된 소스로 KR 이미지를 다시 빌드할 수 있습니다.
+보조 검사는 python3 scripts/project.py check / verify로 실행할 수 있습니다.
 
 기본 배포는 복구본을 자동 생성하지 않습니다. 필요하면 서버를 중단하거나 재생성하여 적용합니다.
 

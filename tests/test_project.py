@@ -6,10 +6,12 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -193,6 +195,45 @@ class ProjectTests(unittest.TestCase):
         self.prepare(force=True)
         self.assertEqual(self.git(source, "rev-parse", "HEAD"), original)
         self.assertEqual((source / ".stronghold-build.json").read_bytes(), stamp)
+
+    def test_setup_cli_prepares_upstream_and_patches_without_prior_prepare_command(self):
+        deployment = types.ModuleType("deploy")
+        deployment.DeploymentError = RuntimeError
+        deployment.dispatch = Mock(return_value={"configured": True})
+        self.assertFalse((self.root / project.SOURCE_REL).exists())
+        with patch.object(project, "ROOT", self.root), patch.object(project, "ensure_upstream", return_value=self.upstream), patch.dict(sys.modules, {"deploy": deployment}), patch("sys.stdout", new=io.StringIO()):
+            self.assertEqual(project.main(["setup"]), 0)
+        source = self.root / project.SOURCE_REL
+        self.assertEqual(json.loads((source / "public/i18n/ko.json").read_text())["hello"], "교정")
+        self.assertIn("Korean build marker", (source / "Dockerfile").read_text())
+        self.assertTrue((source / "tools/custom-check.mjs").is_file())
+        deployment.dispatch.assert_called_once_with("setup", self.root, self.pin, source=source,
+                                                    archive=None, image=None, start=False)
+
+    def test_repeated_setup_cli_automatically_reapplies_changed_patch(self):
+        deployment = types.ModuleType("deploy")
+        deployment.DeploymentError = RuntimeError
+        deployment.dispatch = Mock(return_value={"configured": True})
+        with patch.object(project, "ROOT", self.root), patch.object(project, "ensure_upstream", return_value=self.upstream), patch.dict(sys.modules, {"deploy": deployment}), patch("sys.stdout", new=io.StringIO()):
+            self.assertEqual(project.main(["setup"]), 0)
+            self.layer["messages"]["hello"]["value"] = "다시 교정"
+            project.write_json(self.root / "patches/ko-ui.json", self.layer)
+            self.assertEqual(project.main(["setup"]), 0)
+        source = self.root / project.SOURCE_REL
+        self.assertEqual(json.loads((source / "public/i18n/ko.json").read_text())["hello"], "다시 교정")
+        self.assertEqual(self.git(source, "status", "--porcelain"), "")
+        self.assertEqual(deployment.dispatch.call_count, 2)
+
+    def test_setup_cli_patch_conflict_stops_before_image_or_runtime_configuration(self):
+        deployment = types.ModuleType("deploy")
+        deployment.DeploymentError = RuntimeError
+        deployment.dispatch = Mock()
+        self.layer["messages"]["hello"]["base"] = "unexpected upstream"
+        project.write_json(self.root / "patches/ko-ui.json", self.layer)
+        with patch.object(project, "ROOT", self.root), patch.object(project, "ensure_upstream", return_value=self.upstream), patch.dict(sys.modules, {"deploy": deployment}), patch("sys.stderr", new=io.StringIO()):
+            self.assertEqual(project.main(["setup"]), 1)
+        deployment.dispatch.assert_not_called()
+        self.assertFalse((self.root / project.SOURCE_REL).exists())
 
     def test_local_source_edits_are_preserved_until_explicit_force(self):
         source = self.prepare()

@@ -2,9 +2,9 @@ name: stronghold
 
 services:
   stronghold:
-    image: "${STRONGHOLD_IMAGE:?Run python3 scripts/project.py configure}"
+    image: "${STRONGHOLD_IMAGE:?Run python3 scripts/project.py setup from the project root}"
     build:
-      context: "${STRONGHOLD_SOURCE_DIR:?Run python3 scripts/project.py configure}"
+      context: "${STRONGHOLD_SOURCE_DIR:?Run python3 scripts/project.py setup from the project root}"
       args:
         FETCH_ASSETS: "${FETCH_ASSETS:-1}"
         VOICE_LANG: "${VOICE_LANG:-kr}"

@@ -434,7 +434,9 @@ def main(argv=None):
     checks = sub.add_parser("check", help="Docker-based Node checks for the generated source")
     checks.add_argument("--full", action="store_true")
     for action in ("assets", "configure", "build", "setup", "up", "down", "status", "verify", "rollback"):
-        command = sub.add_parser(action)
+        help_text = ("Prepare upstream and patches, assets, final image and service Compose; "
+                     "then manage service/ with docker compose") if action == "setup" else None
+        command = sub.add_parser(action, help=help_text, description=help_text)
         if action in {"assets", "setup"}:
             command.add_argument("--archive", type=Path)
         if action in {"configure", "build", "setup"}:
@@ -442,7 +444,7 @@ def main(argv=None):
         if action == "build":
             command.add_argument("--fetch-assets", choices=["0", "1"], default="1")
         if action == "setup":
-            command.add_argument("--start", action="store_true")
+            command.add_argument("--start", action="store_true", help="Also start and verify after setup")
         if action == "rollback":
             command.add_argument("--snapshot", help="Private rollback snapshot ID")
         if action in {"up", "down", "status", "verify"}:
@@ -453,22 +455,22 @@ def main(argv=None):
             from . import deploy
         else:
             import deploy
-        pin = load_pin()
+        pin = load_pin(ROOT)
         if args.action == "prepare":
-            result = {"source": str(prepare(force=args.force)), "upstream": pin["ref"]}
+            result = {"source": str(prepare(ROOT, force=args.force)), "upstream": pin["ref"]}
         elif args.action == "update":
             result = {"source": str(update(ROOT, args.ref, args.release_sha256)),
-                      "upstream": load_pin()["ref"]}
+                      "upstream": load_pin(ROOT)["ref"]}
         elif args.action == "capture":
             result = capture(ROOT, args.paths, args.name)
         elif args.action == "check":
-            result = check(ROOT, prepare(), pin, full=args.full)
+            result = check(ROOT, prepare(ROOT), pin, full=args.full)
         else:
             options = vars(args).copy()
             options.pop("action")
             if args.action == "rollback":
                 options["backup"] = options.pop("snapshot")
-            source = prepare() if args.action in {"configure", "build", "setup"} else ROOT / SOURCE_REL
+            source = prepare(ROOT) if args.action in {"configure", "build", "setup"} else ROOT / SOURCE_REL
             result = deploy.dispatch(args.action, ROOT, pin, source=source, **options)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0

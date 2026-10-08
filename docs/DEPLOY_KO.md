@@ -33,30 +33,45 @@ Stronghold-Protocol/
 WSL Ubuntu/Linux, Python 3.10 이상, Git, Docker와 Compose를 사용한다. 호스트 Node.js는 필요하지 않다.
 
 ~~~bash
-python3 scripts/project.py prepare
-python3 scripts/project.py assets
-python3 scripts/project.py build
-python3 scripts/project.py configure
-python3 scripts/project.py up
-python3 scripts/project.py verify
-~~~
-
-assets/build/configure는 setup으로 묶어 실행할 수 있다. setup은 기본적으로 구성과 빌드까지만 한다.
-
-~~~bash
 python3 scripts/project.py setup
-python3 scripts/project.py setup --start
 ~~~
+
+setup 하나로 원본 다운로드와 pin 검증, 한국어 패치 적용, 로컬 에셋 추출,
+최종 KR 이미지 빌드와 service/Compose 설정 생성을 완료한다. prepare를 먼저 실행할 필요가 없다.
+반복 실행하면 패치 변경을 감지해 소스를 다시 준비하며, 기본적으로 서버는 시작하지 않는다.
 
 기존 service/.env의 Tunnel token, 알 수 없는 설정과 주석은 보존한다. 새 환경에서는
 deploy/env.example을 기준으로 .env가 생성되며, 최초 서비스 시작 전에 service/.env의 token을 입력한다.
 이미지 이름, 한국어 음성 설정과 경로는 configure가 생성한다. .env 권한은 600이다.
 루트 .env는 service/.env로 연결하여 IDE에서 같은 파일을 사용할 수 있다.
 
-service/compose.yaml은 생성 파일이다. 템플릿 변경은 deploy/compose.yaml에 하고 configure로 반영한다.
+service/compose.yaml은 생성 파일이다. 템플릿 변경은 deploy/compose.yaml에 하고 setup으로 반영한다.
 빌드 context는 .build/Stronghold-Protocol의 절대 경로이며, 운영 에셋은 읽기 전용으로 마운트한다.
 운영 프로젝트 이름 stronghold, 127.0.0.1:3000 포트와 기존 Named Tunnel 연결을 유지한다.
 로컬 접속은 http://localhost:3000/?lang=ko이다.
+
+준비 후에는 service/에서 Docker Compose로 관리한다.
+
+~~~bash
+cd service
+docker compose up -d
+docker compose ps
+docker compose logs -f
+docker compose restart
+docker compose down
+~~~
+
+Compose의 build context도 준비한 소스를 가리키며, FETCH_ASSETS=1과 VOICE_LANG=kr을 사용한다.
+따라서 Python 운영 명령 없이 이미지를 다시 빌드하고 컨테이너를 교체할 수 있다.
+
+~~~bash
+# service/ 안에서 준비된 소스를 다시 빌드하고 적용
+docker compose build
+docker compose up -d
+~~~
+
+restart는 기존 컨테이너를 다시 시작한다. 새 이미지나 환경 설정을 적용할 때는 up -d를 사용한다.
+새 패치를 적용하거나 원본 pin을 갱신할 때는 프로젝트 루트에서 setup을 다시 실행한 뒤 up -d를 실행한다.
 
 ## 추가 한글화와 기타 수정
 
@@ -73,12 +88,11 @@ JSON을 저장한 뒤 다음 명령으로 검사하고 서비스에 반영한다
 실행 중인 웹 서비스의 번역이 바뀌지는 않는다.
 
 ~~~bash
-python3 scripts/project.py prepare
+python3 scripts/project.py setup
 python3 scripts/project.py check
-python3 scripts/project.py build
-python3 scripts/project.py configure
-python3 scripts/project.py up
-python3 scripts/project.py verify
+cd service
+docker compose up -d
+python3 ../scripts/project.py verify
 ~~~
 
 한국어 선택은 제목 화면 또는 설정의 Language / 语言 메뉴에 있다.
@@ -119,14 +133,15 @@ lint/import/typecheck를 실행한다. --full은 원본 전체 테스트도 실�
 CI도 원본을 지정한 커밋으로 재구성하고 위 검사를 수행한다.
 
 ~~~bash
-python3 scripts/project.py up --dev
-python3 scripts/project.py verify --dev
-python3 scripts/project.py status --dev
-python3 scripts/project.py down --dev
+cd service
+docker compose -f compose.dev.yaml up -d
+python3 ../scripts/project.py verify --dev
+docker compose -f compose.dev.yaml ps
+docker compose -f compose.dev.yaml down
 ~~~
 
 개발 서버는 별도 프로젝트와 127.0.0.1:3100 포트를 사용한다.
-up은 빌드를 수행하지 않으므로 변경한 소스를 적용할 때는 build와 configure를 먼저 실행한다.
+setup에서 준비한 소스와 KR 이미지를 사용하며, 별도의 prepare나 configure는 필요하지 않다.
 소스 준비·Git push·검사만으로 실행 중 운영 컨테이너의 프로그램이 교체되지는 않는다.
 
 ## 원본 업데이트와 에셋
@@ -137,8 +152,7 @@ up은 빌드를 수행하지 않으므로 변경한 소스를 적용할 때는 b
 ~~~bash
 git switch -c update/upstream-vX.Y.Z
 python3 scripts/project.py update --ref vX.Y.Z
-python3 scripts/project.py assets
-python3 scripts/project.py build
+python3 scripts/project.py setup
 python3 scripts/project.py check --full
 ~~~
 
@@ -154,21 +168,26 @@ ZIP SHA256, 경로, manifest 항목 수와 모든 참조 파일을 확인한 뒤
 원본 0.1.3에서 0.2.1로는 소환물 39개·파일 117개가 추가되며, manifest는 1481에서 1598개가 된다.
 한국어 음성은 별도의 KR 빌드를 사용하며, CN Full Release의 음성을 복사하지 않는다.
 
-검증한 lock·패치·스크립트를 main에 합쳐 push한 다음 configure/up/verify로 운영에 적용한다.
+검증한 lock·패치·스크립트를 main에 합쳐 push한 다음 service/에서 docker compose up -d로 운영에 적용한다.
+반영 후 보조 검사 python3 ../scripts/project.py verify를 사용할 수 있다.
 원본 tag 이름은 lock에 기록하며, 이 자체 저장소에는 원본 tag를 가져올 필요가 없다.
 자체 릴리스에는 ko/v0.2.1-r1 같은 이름을 사용할 수 있다.
 
 ## 상태와 종료
 
 ~~~bash
-python3 scripts/project.py status
-python3 scripts/project.py down
-python3 scripts/project.py up
+cd service
+docker compose ps
+docker compose down
+docker compose up -d
 ~~~
 
 기본 configure/build/up은 복구 이미지나 설정 백업을 생성하지 않는다.
 배포에 필요하면 서버를 중단하거나 컨테이너를 재생성할 수 있으며, 이전 서버·이미지 유지는 전제하지 않는다.
 현재 service/.env의 비밀값과 알 수 없는 설정은 계속 보존하고 실제 파일 권한은 600으로 유지한다.
+
+Python의 prepare/assets/build/configure는 준비 단계의 부분 실행 도구이며,
+check/verify와 up/down/status는 보조 명령으로 남아 있다. 일상 운영은 Docker Compose로 수행한다.
 
 이미 만들어진 service/rollback 기록과 archive 백업은 남겨 두었다.
 rollback 명령은 이 기존 기록을 사용할 때만 유효하며, 새 배포는 복구 대상을 자동 갱신하지 않는다.

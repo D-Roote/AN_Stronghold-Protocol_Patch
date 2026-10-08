@@ -2,6 +2,8 @@
 import hashlib
 import importlib.util
 import json
+import os
+import shutil
 import stat
 import tempfile
 import unittest
@@ -121,6 +123,55 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(result, {"image": "stronghold:new", "built": True})
         self.assertFalse((self.service / "rollback").exists())
         self.assertFalse((self.service / ".pending-rollback").exists())
+
+    def test_setup_finishes_assets_image_and_compose_without_starting_service(self):
+        self.existing_runtime()
+        archive = self.release()
+        with patch.object(deploy, "_run", return_value="") as run:
+            result = deploy.setup(self.root, self.pin, self.source, archive=archive)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.args[0][:2], ["docker", "build"])
+        self.assertEqual(result["assets"]["entries"], 1)
+        self.assertEqual(result["build"]["image"], result["configuration"]["image"])
+        self.assertEqual(Path(result["service_directory"]), self.service)
+        self.assertTrue(Path(result["compose"]).is_file())
+        self.assertTrue((self.service / "compose.dev.yaml").is_file())
+        env = (self.service / ".env").read_text()
+        self.assertIn("TUNNEL_TOKEN=private-token", env)
+        self.assertIn(f"STRONGHOLD_SOURCE_DIR='{self.source}'", env)
+        self.assertIn("VOICE_LANG='kr'", env)
+        self.assertEqual(stat.S_IMODE((self.service / ".env").stat().st_mode), 0o600)
+        self.assertFalse((self.service / "rollback").exists())
+        self.assertNotIn("service", result)
+
+    @unittest.skipUnless(shutil.which("docker"), "Docker CLI is required to parse generated Compose")
+    def test_generated_service_is_directly_usable_by_docker_compose(self):
+        self.existing_runtime()
+        actual_templates = Path(__file__).resolve().parents[1] / "deploy"
+        for filename in ("compose.yaml", "compose.dev.yaml"):
+            (self.root / "deploy" / filename).write_text((actual_templates / filename).read_text())
+        archive = self.release()
+        with patch.object(deploy, "_run", return_value=""):
+            result = deploy.setup(self.root, self.pin, self.source, archive=archive)
+        environment = {key: value for key, value in os.environ.items()
+                       if key not in deploy._MANAGED | {"TUNNEL_TOKEN", "COMPOSE_FILE", "COMPOSE_PROJECT_NAME"}}
+        available = deploy.subprocess.run(["docker", "compose", "version"], capture_output=True, env=environment)
+        if available.returncode:
+            self.skipTest("Docker Compose plugin is unavailable")
+        for filename, project, port in (("compose.yaml", "stronghold", 3000),
+                                         ("compose.dev.yaml", "stronghold-ko-dev", 3100)):
+            parsed = deploy.subprocess.run(["docker", "compose", "-f", filename, "config", "--format", "json"],
+                                           cwd=self.service, env=environment, capture_output=True, text=True)
+            self.assertEqual(parsed.returncode, 0)
+            config = json.loads(parsed.stdout)
+            app = config["services"]["stronghold"]
+            self.assertEqual(config["name"], project)
+            self.assertEqual(app["image"], result["build"]["image"])
+            self.assertEqual(Path(app["build"]["context"]), self.source)
+            self.assertEqual(app["build"]["args"], {"FETCH_ASSETS": "1", "VOICE_LANG": "kr"})
+            self.assertEqual(app["ports"][0]["host_ip"], "127.0.0.1")
+            self.assertEqual(int(app["ports"][0]["published"]), port)
+            self.assertTrue(all(mount["read_only"] for mount in app["volumes"]))
 
     def test_failed_build_preserves_private_configuration_without_creating_backup(self):
         self.existing_runtime()
