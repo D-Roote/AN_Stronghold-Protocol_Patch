@@ -24,13 +24,20 @@ export function ensureTeamChatCss(doc = globalThis.document) {
   return true;
 }
 
-/** Freeze the rendered history at close time; later store updates cannot alter this shallow snapshot. */
+/** A bounded visual snapshot; closing or receiving a message starts its five-second lifetime. */
 export function makeClosedChatPreview(messages, now = Date.now(), factions = {}, scrollTop = 0) {
   return { messages: Array.isArray(messages) ? [...messages] : [], factions: { ...factions }, scrollTop, expiresAt: now + CHAT_CLOSED_PREVIEW_MS };
 }
 
 export function closedChatPreviewMessages(preview, now = Date.now()) {
   return preview && Number.isFinite(preview.expiresAt) && preview.expiresAt > now ? preview.messages : [];
+}
+
+/** Remounting between match stages must not make old messages appear new. */
+export function receivedChatPreview(messages, now = Date.now(), factions = {}) {
+  const receivedAt = messages?.at(-1)?.receivedAt;
+  if (!Number.isFinite(receivedAt) || receivedAt + CHAT_CLOSED_PREVIEW_MS <= now) return null;
+  return makeClosedChatPreview(messages, receivedAt, factions, null);
 }
 
 /** The same state drives the disabled button and submit guard (Enter included). */
@@ -79,6 +86,12 @@ export function TeamChatFeed({ messages = [], factions = {}, playerId, onScroll 
   return html`<div class="team-chat__feed" role="log" aria-label=${t('队伍聊天')} aria-live="polite" aria-relevant="additions" aria-atomic="false" onScroll=${onScroll}>
     ${messages.map((message) => {
       const faction = chatFaction(message.kind === 'faction' ? message.faction : factions[message.playerId]);
+      if (message.kind === 'restart') {
+        return html`<div key=${message.id} class="team-chat__message is-system is-restart" style="--faction-color:var(--mint-500)">
+          <span class="team-chat__system-dot" aria-hidden="true"></span>
+          <span>${t('{name}博士请求重新开始模拟。', { name: message.name })}</span>
+        </div>`;
+      }
       if (message.kind === 'faction' && faction) {
         return html`<div key=${message.id} class="team-chat__message is-system" style=${`--faction-color:${faction.color}`}>
           <span class="team-chat__system-dot" aria-hidden="true"></span>
@@ -138,7 +151,39 @@ function useDismissible({ rootRef, toggleRef, focusRef, open, onToggle, onEscape
   }, [open]);
 }
 
-/** Open history is retained in bounded memory; closing freezes a ten-second visual snapshot. */
+function useChatEnterShortcut(options) {
+  const latest = useRef(options);
+  latest.current = options;
+  useLayoutEffect(() => {
+    const doc = latest.current.rootRef.current?.ownerDocument;
+    if (!doc) return undefined;
+    const enter = (event) => {
+      if (event.key !== 'Enter' || event.defaultPrevented || event.isComposing || event.keyCode === 229
+        || event.repeat || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey
+        || doc.querySelector('.modal, .guide')) return;
+      const current = latest.current;
+      const target = event.target;
+      if (target?.closest?.('[role="dialog"]')) return;
+      const editing = target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])');
+      if (editing && editing !== current.inputRef.current) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (!current.open) { current.onToggle(true); return; }
+      if (current.text.trim()) {
+        current.inputRef.current?.focus({ preventScroll: true });
+        void current.onSubmit(event);
+      } else if (!current.sending) {
+        current.onClosePicker();
+        current.onToggle(false);
+        current.toggleRef.current?.focus({ preventScroll: true });
+      }
+    };
+    doc.addEventListener('keydown', enter, true);
+    return () => doc.removeEventListener('keydown', enter, true);
+  }, []);
+}
+
+/** Retain session history while briefly showing incoming messages even with the composer closed. */
 export function TeamChat({
   open, onToggle, online, playerId, target = chatStore, onSend = sendTeamChat, onSelectFaction = sendTeamFaction,
 }) {
@@ -158,6 +203,7 @@ export function TeamChat({
   const factionRef = useRef(state.factions || {});
   const previewTimer = useRef(null);
   const feedScroll = useRef(0);
+  const seenMessage = useRef(null);
   messageRef.current = state.messages || [];
   factionRef.current = state.factions || {};
   const now = Date.now();
@@ -167,16 +213,24 @@ export function TeamChat({
   const chars = [...text].length;
 
   useLayoutEffect(() => {
-    if (previewTimer.current != null) clearTimeout(previewTimer.current);
-    previewTimer.current = null;
-    if (open) setPreview(null);
-    else if (wasOpen.current) {
-      const frozen = makeClosedChatPreview(messageRef.current, Date.now(), factionRef.current, feedScroll.current);
-      setPreview(frozen);
-      previewTimer.current = setTimeout(() => { previewTimer.current = null; setPreview(null); }, CHAT_CLOSED_PREVIEW_MS);
+    const last = messageRef.current.at(-1);
+    const incoming = !!last && last.id !== seenMessage.current;
+    seenMessage.current = last?.id || null;
+    const closing = !open && wasOpen.current;
+    if (open || !last || closing || incoming) {
+      if (previewTimer.current != null) clearTimeout(previewTimer.current);
+      previewTimer.current = null;
+      const next = open || !last ? null : closing
+        ? makeClosedChatPreview(messageRef.current, Date.now(), factionRef.current, feedScroll.current)
+        : receivedChatPreview(messageRef.current, Date.now(), factionRef.current);
+      setPreview(next);
+      if (next) previewTimer.current = setTimeout(() => {
+        previewTimer.current = null;
+        setPreview(null);
+      }, Math.max(1, next.expiresAt - Date.now()));
     }
     wasOpen.current = open;
-  }, [open]);
+  }, [open, state.messages, state.factions]);
   useEffect(() => () => { if (previewTimer.current != null) clearTimeout(previewTimer.current); }, []);
   useEffect(() => { if (!open) setPickerOpen(false); }, [open]);
   useEffect(() => {
@@ -189,7 +243,7 @@ export function TeamChat({
   useLayoutEffect(() => {
     const feed = rootRef.current?.querySelector('.team-chat__feed');
     if (!feed) return;
-    feed.scrollTop = open ? feed.scrollHeight : preview?.scrollTop || 0;
+    feed.scrollTop = open || preview?.scrollTop == null ? feed.scrollHeight : preview.scrollTop;
     if (open) feedScroll.current = feed.scrollTop;
   }, [state.messages, preview, open]);
   useDismissible({
@@ -210,6 +264,8 @@ export function TeamChat({
     } catch (err) { setError(err.code || 'FAILED'); }
     finally { pending.current = false; redraw((value) => value + 1); }
   };
+  useChatEnterShortcut({ rootRef, toggleRef, inputRef, open, onToggle, text, onSubmit: submit,
+    sending: state.sending || pending.current, onClosePicker: () => setPickerOpen(false) });
   const selectFaction = async (faction) => {
     if (factionAction.disabled) { setError(factionAction.reason); return; }
     pending.current = true;
@@ -237,7 +293,10 @@ export function TeamChat({
           <input id="team-chat-input" class="team-chat__input" ref=${inputRef} type="text" value=${text} maxlength=${CHAT_MAX_LENGTH * 2}
             placeholder=${t('输入消息，Enter发送')} autocomplete="off" spellcheck=${false} aria-label=${t('队伍聊天')}
             aria-describedby=${note ? 'team-chat-note' : undefined}
-            onInput=${(event) => { setText(event.currentTarget.value); setError(null); }} />
+            onInput=${(event) => { setText(event.currentTarget.value); setError(null); }}
+            onKeyDown=${(event) => {
+              if (event.key === 'Enter' && (event.isComposing || event.keyCode === 229 || event.repeat)) event.preventDefault();
+            }} />
           <span class="team-chat__picker-wrap">
             <button type="button" class=${`team-chat__picker-toggle${pickerOpen ? ' is-open' : ''}`}
               aria-expanded=${pickerOpen ? 'true' : 'false'} aria-controls="team-chat-picker" aria-haspopup="dialog"
@@ -251,7 +310,7 @@ export function TeamChat({
         </div>
         <div class="team-chat__meta">
           ${note ? html`<span id="team-chat-note" class="team-chat__note" role="status">${note}</span>`
-            : html`<span class="team-chat__note">${t('关闭聊天后，消息将在10秒后隐藏')}</span>`}
+            : html`<span class="team-chat__note">${t('关闭聊天后，消息将在5秒后隐藏')}</span>`}
           <span class=${`team-chat__count${chars > CHAT_MAX_LENGTH ? ' is-long' : ''}`} aria-hidden="true">${chars}/${CHAT_MAX_LENGTH}</span>
         </div>
       </form>` : null}

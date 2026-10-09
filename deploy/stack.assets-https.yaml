@@ -1,0 +1,24 @@
+# Combine with stack.assets-direct.yaml when nginx terminates TLS itself.
+services:
+  assets:
+    ports:
+      - "${ASSET_BIND_IP:-0.0.0.0}:${ASSET_HTTPS_PORT:-443}:443"
+    volumes:
+      - type: bind
+        source: ./nginx-assets-https.conf.template
+        target: /etc/nginx/templates/default.conf.template
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${ASSET_TLS_CERT:?Set ASSET_TLS_CERT to the full certificate chain}"
+        target: /etc/nginx/tls/fullchain.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${ASSET_TLS_KEY:?Set ASSET_TLS_KEY to the private key}"
+        target: /etc/nginx/tls/privkey.pem
+        read_only: true
+        bind:
+          create_host_path: false

@@ -1,0 +1,23 @@
+server {
+    listen 80;
+    server_name _;
+    root /srv/stronghold-assets;
+    location = ${ASSET_PUBLIC_PATH}/healthz/assets {
+        rewrite ^${ASSET_PUBLIC_PATH}(/.*)$ $1 break;
+        default_type application/json;
+        add_header Cache-Control "no-store" always;
+    }
+    location / { return 308 https://$host$request_uri; }
+}
+
+server {
+    listen 443 ssl;
+    server_name _;
+    root /srv/stronghold-assets;
+    ssl_certificate /etc/nginx/tls/fullchain.pem;
+    ssl_certificate_key /etc/nginx/tls/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:ASSET_TLS:1m;
+    ssl_session_timeout 10m;
+    include /etc/nginx/conf.d/asset-routes.inc;
+}

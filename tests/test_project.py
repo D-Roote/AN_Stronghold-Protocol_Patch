@@ -267,7 +267,8 @@ class ProjectTests(unittest.TestCase):
         self.assertIn("Korean build marker", (source / "Dockerfile").read_text())
         self.assertTrue((source / "tools/custom-check.mjs").is_file())
         deployment.dispatch.assert_called_once_with("setup", self.root, self.pin, source=source,
-                                                    archive=None, image=None, start=False)
+                                                        archive=None, image=None, start=False,
+                                                        asset_server=False, asset_output=None)
 
     def test_repeated_setup_cli_automatically_reapplies_changed_patch(self):
         deployment = types.ModuleType("deploy")

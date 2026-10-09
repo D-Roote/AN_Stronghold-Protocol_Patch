@@ -492,18 +492,22 @@ def main(argv=None):
     cap.add_argument("--name", required=True)
     checks = sub.add_parser("check", help="Docker-based Node checks for the generated source")
     checks.add_argument("--full", action="store_true")
-    for action in ("assets", "configure", "build", "setup", "up", "down", "status", "verify", "rollback"):
+    for action in ("assets", "assets-export", "configure", "build", "setup", "up", "down", "status", "verify", "rollback"):
         help_text = ("Prepare upstream and patches, assets, final image and service Compose; "
                      "then manage service/ with docker compose") if action == "setup" else None
         command = sub.add_parser(action, help=help_text, description=help_text)
         if action in {"assets", "setup"}:
             command.add_argument("--archive", type=Path)
-        if action in {"configure", "build", "setup"}:
+        if action in {"configure", "build", "setup", "assets-export"}:
             command.add_argument("--image")
+        if action == "assets-export":
+            command.add_argument("--output", type=Path, help="Asset bundle directory; default from service/.env")
         if action == "build":
             command.add_argument("--fetch-assets", choices=["0", "1"], default="1")
         if action == "setup":
             command.add_argument("--start", action="store_true", help="Also start and verify after setup")
+            command.add_argument("--asset-server", action="store_true", help="Also export a complete nginx-only asset bundle")
+            command.add_argument("--asset-output", type=Path, help="Custom directory for --asset-server")
         if action == "rollback":
             command.add_argument("--snapshot", help="Private rollback snapshot ID")
         if action in {"up", "down", "status", "verify"}:

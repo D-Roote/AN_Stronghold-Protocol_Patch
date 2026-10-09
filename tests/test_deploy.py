@@ -81,6 +81,222 @@ class DeploymentTests(unittest.TestCase):
             deploy._rewrite_env("SECRET='private-value\n", {"VOICE_LANG": "kr"})
         self.assertNotIn("private-value", str(raised.exception))
 
+    def test_public_runtime_setting_ignores_keys_inside_private_multiline_values(self):
+        text = "PRIVATE='first\nASSET_BUNDLE_DIR=/private-location\nlast'\nASSET_BUNDLE_DIR='./assets/my bundle' # public\n"
+        self.assertEqual(deploy._runtime_setting(text, "ASSET_BUNDLE_DIR"), "./assets/my bundle")
+        self.assertIsNone(deploy._runtime_setting(text, "ASSET_TLS_KEY"))
+        value = "/tmp/player's assets"
+        text = deploy._rewrite_env(text, {"ASSET_BUNDLE_DIR": value})
+        self.assertEqual(deploy._runtime_setting(text, "ASSET_BUNDLE_DIR"), value)
+        for setting in ('"${PRIVATE}"', "${HOME}/assets", "'first\nlast'"):
+            with self.assertRaises(deploy.DeploymentError):
+                deploy._runtime_setting(f"ASSET_BUNDLE_DIR={setting}\n", "ASSET_BUNDLE_DIR")
+
+    def fake_asset_image(self):
+        image = self.root / "fake-image"
+        files = {"public/assets/char/avatar.png": b"PNG", "public/assets/audio/bgm/track.mp3": b"BGM",
+                 "public/assets/audio/voice/kr/player/line.mp3": b"KR",
+                 "public/assets/audio/voice/jp/player/line.mp3": b"JP",
+                 "public/assets/local/stale.png": b"STALE",
+                 "public/fonts/fonts.css": b"font-face", "public/fonts/font.woff2": b"WOFF"}
+        for relative, content in files.items():
+            file = image / relative
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_bytes(content)
+        document = {"art": "/assets/char/avatar.png", "bgm": "/assets/audio/bgm/track.mp3",
+                    "audio": {"voicePacks": {"kr": {"player": "/assets/audio/voice/kr/player/line.mp3"},
+                                             "jp": {"player": "/assets/audio/voice/jp/player/line.mp3"}}},
+                    "fonts": {"css": "/fonts/fonts.css", "face": "/fonts/font.woff2"}}
+        (image / "data").mkdir()
+        (image / "data/assets.json").write_text(json.dumps(document))
+        (image / "package.json").write_text('{"version":"0.2.1"}')
+
+        def command(args, **unused):
+            args = list(args)
+            if args[:3] == ["docker", "image", "inspect"]:
+                return "sha256:" + "a" * 64
+            if args[:2] == ["docker", "create"]:
+                return "c" * 64
+            if args[:2] == ["docker", "cp"]:
+                relative = args[2].split(":/app/", 1)[1].removesuffix("/.")
+                source, target = image / relative, Path(args[3])
+                if source.is_dir():
+                    shutil.copytree(source, target, dirs_exist_ok=True, symlinks=True)
+                else:
+                    shutil.copyfile(source, target)
+                return ""
+            if args[:3] == ["docker", "rm", "-f"]:
+                return ""
+            raise AssertionError(f"Unexpected Docker command: {args[:3]}")
+        return image, command
+
+    def test_asset_export_contains_all_media_fonts_and_verified_local_files(self):
+        self.existing_assets()
+        self.existing_runtime()
+        _, command = self.fake_asset_image()
+        with patch.object(deploy, "_run", side_effect=command) as run:
+            result = deploy.export_asset_server(self.root, self.pin, self.source)
+        destination = Path(result["bundle_directory"])
+        self.assertEqual(result["files"], 7)
+        self.assertFalse(result["reused"])
+        self.assertEqual(result["bytes"], 26)
+        self.assertFalse((destination / "assets/local/stale.png").exists())
+        self.assertEqual((destination / "assets/local/model/item.png").read_bytes(), b"PNG")
+        self.assertEqual((destination / "assets/audio/voice/jp/player/line.mp3").read_bytes(), b"JP")
+        health = json.loads((destination / "healthz/assets").read_text())
+        self.assertEqual(health["bundle"], result["bundle"])
+        self.assertTrue(health["ok"])
+        self.assertFalse((destination / "server").exists())
+        self.assertTrue(all((self.service / name).exists() for name in deploy.ASSET_COMPOSE_FILES))
+        self.assertEqual(stat.S_IMODE(destination.stat().st_mode), 0o755)
+        self.assertEqual(stat.S_IMODE((destination / "healthz/assets").stat().st_mode), 0o644)
+        self.assertTrue(any(call.args[0][:3] == ["docker", "rm", "-f"] for call in run.call_args_list))
+        self.assertFalse(any(call.args[0][:2] == ["docker", "start"] for call in run.call_args_list))
+        self.assertIn("TUNNEL_TOKEN=private-token", (self.service / ".env").read_text())
+        self.assertNotIn("private-token", json.dumps(result))
+
+    def test_asset_export_reuses_matching_inventory_and_repairs_changed_files(self):
+        self.existing_assets()
+        self.existing_runtime()
+        _, command = self.fake_asset_image()
+        with patch.object(deploy, "_run", side_effect=command):
+            first = deploy.export_asset_server(self.root, self.pin, self.source)
+        with patch.object(deploy, "_run", side_effect=command) as run:
+            second = deploy.export_asset_server(self.root, self.pin, self.source)
+        self.assertTrue(second["reused"])
+        self.assertEqual(first["bundle"], second["bundle"])
+        self.assertEqual(run.call_count, 1, "reuse only inspects the image identity")
+        file = Path(second["bundle_directory"]) / "assets/char/avatar.png"
+        file.write_bytes(b"BROKEN")
+        with patch.object(deploy, "_run", side_effect=command):
+            third = deploy.export_asset_server(self.root, self.pin, self.source)
+        self.assertFalse(third["reused"])
+        self.assertEqual(file.read_bytes(), b"PNG")
+        self.assertFalse(list(file.parents[2].glob(".current.retired-*")))
+
+    def test_asset_export_rejects_wrong_image_version_and_missing_or_mixed_voice_banks(self):
+        self.existing_assets()
+        self.existing_runtime()
+        image, command = self.fake_asset_image()
+        (image / "package.json").write_text('{"version":"0.1.3"}')
+        with patch.object(deploy, "_run", side_effect=command), self.assertRaisesRegex(deploy.DeploymentError, "version"):
+            deploy.export_asset_server(self.root, self.pin, self.source)
+        (image / "package.json").write_text('{"version":"0.2.1"}')
+        path = image / "data/assets.json"
+        document = json.loads(path.read_text())
+        del document["audio"]["voicePacks"]["jp"]
+        path.write_text(json.dumps(document))
+        with patch.object(deploy, "_run", side_effect=command), self.assertRaisesRegex(deploy.DeploymentError, "KR and JP"):
+            deploy.export_asset_server(self.root, self.pin, self.source)
+        document["audio"]["voicePacks"]["jp"] = {"player": "/assets/audio/voice/kr/player/line.mp3"}
+        path.write_text(json.dumps(document))
+        with patch.object(deploy, "_run", side_effect=command), self.assertRaisesRegex(deploy.DeploymentError, "KR and JP"):
+            deploy.export_asset_server(self.root, self.pin, self.source)
+
+    def test_asset_export_uses_configurable_directory_and_public_prefix(self):
+        self.existing_assets()
+        self.existing_runtime()
+        with (self.service / ".env").open("a") as stream:
+            stream.write("ASSET_BUNDLE_DIR='./assets/my bundle'\nASSET_PUBLIC_PATH=/stronghold/assets-v2\n")
+        _, command = self.fake_asset_image()
+        with patch.object(deploy, "_run", side_effect=command):
+            result = deploy.export_asset_server(self.root, self.pin, self.source)
+        self.assertEqual(Path(result["bundle_directory"]), self.service / "assets/my bundle")
+        self.assertEqual(result["health_path"], "/stronghold/assets-v2/healthz/assets")
+        self.assertEqual(deploy._runtime_setting((self.service / ".env").read_text(), "ASSET_BUNDLE_DIR"), result["bundle_directory"])
+        for prefix in ("/../private", "/trailing/", "https://example.com", "/bad;include", "/$variable"):
+            with self.subTest(prefix=prefix):
+                (self.service / ".env").write_text(f"ASSET_PUBLIC_PATH='{prefix}'\n")
+                with patch.object(deploy, "_run") as run, self.assertRaises(deploy.DeploymentError):
+                    deploy.export_asset_server(self.root, self.pin, self.source)
+                run.assert_not_called()
+
+    def test_failed_asset_export_preserves_published_bundle_env_and_cleans_container(self):
+        self.existing_assets()
+        self.existing_runtime()
+        image, command = self.fake_asset_image()
+        with patch.object(deploy, "_run", side_effect=command):
+            first = deploy.export_asset_server(self.root, self.pin, self.source)
+        old_env = (self.service / ".env").read_bytes()
+        old_inventory = (Path(first["bundle_directory"]) / ".bundle.json").read_bytes()
+        (image / "public/assets/char/avatar.png").unlink()
+        def changed_image(args, **options):
+            return "sha256:" + "b" * 64 if args[:3] == ["docker", "image", "inspect"] else command(args, **options)
+        with patch.object(deploy, "_run", side_effect=changed_image) as run, self.assertRaises(deploy.DeploymentError):
+            deploy.export_asset_server(self.root, self.pin, self.source)
+        self.assertEqual((self.service / ".env").read_bytes(), old_env)
+        self.assertEqual((Path(first["bundle_directory"]) / ".bundle.json").read_bytes(), old_inventory)
+        self.assertTrue(any(call.args[0][:3] == ["docker", "rm", "-f"] for call in run.call_args_list))
+        self.assertFalse(list((self.service / "assets/direct").glob(".current.*")))
+
+    def test_asset_export_rejects_symlinks_empty_files_and_non_generated_destinations(self):
+        self.existing_assets()
+        self.existing_runtime()
+        image, command = self.fake_asset_image()
+        target = self.service / "custom"
+        target.mkdir()
+        (target / "keep").write_text("user data")
+        with patch.object(deploy, "_run") as run, self.assertRaises(deploy.DeploymentError):
+            deploy.export_asset_server(self.root, self.pin, self.source, output=target)
+        run.assert_not_called()
+        self.assertEqual((target / "keep").read_text(), "user data")
+        for destination in (self.root, self.service, self.source, self.root.parent):
+            with self.subTest(destination=destination), self.assertRaises(deploy.DeploymentError):
+                deploy.export_asset_server(self.root, self.pin, self.source, output=destination)
+        file = image / "public/assets/char/avatar.png"
+        file.write_bytes(b"")
+        with patch.object(deploy, "_run", side_effect=command), self.assertRaises(deploy.DeploymentError):
+            deploy.export_asset_server(self.root, self.pin, self.source)
+        file.unlink()
+        file.symlink_to(image / "public/fonts/fonts.css")
+        with patch.object(deploy, "_run", side_effect=command), self.assertRaises(deploy.DeploymentError):
+            deploy.export_asset_server(self.root, self.pin, self.source)
+
+    def test_setup_asset_server_exports_after_build_and_configuration_without_start(self):
+        archive = self.release()
+        with patch.object(deploy, "_run", return_value=""), patch.object(deploy, "export_asset_server", return_value={"files": 7}) as export:
+            result = deploy.setup(self.root, self.pin, self.source, archive=archive, asset_server=True, asset_output=Path("custom"))
+        export.assert_called_once_with(self.root, self.pin, self.source, image=result["build"]["image"], output=Path("custom"))
+        self.assertEqual(result["asset_server"], {"files": 7})
+        self.assertNotIn("service", result)
+        with self.assertRaises(deploy.DeploymentError):
+            deploy.setup(self.root, self.pin, self.source, asset_output=Path("custom"))
+
+    @unittest.skipUnless(shutil.which("docker"), "Docker CLI is required to parse generated Compose")
+    def test_asset_compose_is_nginx_only_and_https_override_replaces_the_http_template(self):
+        self.existing_assets()
+        self.existing_runtime()
+        templates = Path(__file__).resolve().parents[1] / "deploy"
+        for name in deploy.GENERATED_FILES:
+            (self.root / "deploy" / name).write_text((templates / name).read_text())
+        _, command = self.fake_asset_image()
+        with patch.object(deploy, "_run", side_effect=command):
+            result = deploy.export_asset_server(self.root, self.pin, self.source)
+        environment = {key: value for key, value in os.environ.items()
+                       if key not in deploy._MANAGED | {"TUNNEL_TOKEN", "COMPOSE_FILE", "COMPOSE_PROJECT_NAME"}}
+        with (self.service / ".env").open("a") as stream:
+            stream.write("ASSET_TLS_CERT=./tls/fullchain.pem\nASSET_TLS_KEY=./tls/privkey.pem\nASSET_PUBLIC_PATH=/stronghold\n")
+        for tls in (False, True):
+            args = ["docker", "compose", "-f", "stack.assets-direct.yaml"]
+            if tls:
+                args.extend(["-f", "stack.assets-https.yaml"])
+            parsed = deploy.subprocess.run([*args, "config", "--format", "json"], cwd=self.service,
+                                           env=environment, capture_output=True, text=True)
+            self.assertEqual(parsed.returncode, 0)
+            config = json.loads(parsed.stdout)
+            self.assertEqual(config["name"], "stronghold-assets")
+            self.assertEqual(set(config["services"]), {"assets"})
+            assets = config["services"]["assets"]
+            self.assertNotIn("build", assets)
+            self.assertEqual(assets["environment"]["ASSET_PUBLIC_PATH"], "/stronghold")
+            self.assertEqual(assets["environment"]["NGINX_ENVSUBST_FILTER"].replace("$$", "$"), "^ASSET_PUBLIC_PATH$")
+            volumes = {v["target"]: v for v in assets["volumes"]}
+            self.assertEqual(volumes["/srv/stronghold-assets"]["source"], result["bundle_directory"])
+            chosen = "nginx-assets-https.conf.template" if tls else "nginx-assets-http.conf.template"
+            self.assertEqual(Path(volumes["/etc/nginx/templates/default.conf.template"]["source"]).name, chosen)
+            self.assertTrue(all(v["read_only"] and not v["bind"]["create_host_path"] for v in volumes.values()))
+            self.assertEqual({int(p["published"]) for p in assets["ports"]}, {8081, 443} if tls else {8081})
+
     def existing_runtime(self):
         (self.service / ".env").write_text("TUNNEL_TOKEN=private-token\nSTRONGHOLD_IMAGE=original:tag\n")
         (self.service / "stack.cf-tunnel.yaml").write_text("name: stronghold\nservices: {}\n")

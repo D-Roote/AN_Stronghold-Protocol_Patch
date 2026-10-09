@@ -49,6 +49,7 @@
 }
 .team-chat__icon circle { fill: currentColor; stroke: none; }
 .team-chat__label { display: block; line-height: 1; }
+.team-chat__toggle:focus-visible { outline: none; box-shadow: none; }
 /* Match chat stays beside the tools disclosure; the narrower button moves the menu with the flex row. */
 .gm__corner--tools > .team-chat .team-chat__toggle { width: var(--team-control-h); padding: 0; gap: 0; }
 .gm__corner--tools > .team-chat .team-chat__label { display: none; }
@@ -132,6 +133,7 @@
   box-shadow: 0 0 7px var(--faction-color);
   transform: rotate(45deg);
 }
+.team-chat__message.is-restart { color: var(--mint-500); font-weight: 600; }
 
 .team-chat__form { position: relative; flex: 0 0 auto; margin-top: max(.14rem, 9px); }
 .team-chat__compose { display: flex; align-items: stretch; gap: max(.07rem, 5px); }
@@ -283,6 +285,15 @@
   z-index: 14;
 }
 .phase-chat .team-chat__panel { left: 0; }
+.phase-chat--brief { bottom: max(.2rem, 14px); }
+.brief__foot { flex-wrap: wrap; gap: max(.2rem, 12px); padding-left: max(1.45rem, 112px); }
+.brief__left { overflow-y: auto; overscroll-behavior: contain; }
+.brief__left > * { flex-shrink: 0; }
+.brief-restart { white-space: nowrap; }
+.restart-transition { position: fixed; inset: 0; z-index: 10000; background: #000; pointer-events: auto; animation: restart-cover .18s ease-out both; }
+.restart-transition.is-revealing { animation: restart-reveal .18s ease-in both; }
+@keyframes restart-cover { from { opacity: 0; } to { opacity: 1; } }
+@keyframes restart-reveal { from { opacity: 1; } to { opacity: 0; } }
 .draft .draft-order { padding-bottom: max(.65rem, 44px); overflow-y: auto; }
 .seat__who .team-chat__faction {
   flex: 0 0 auto;
@@ -312,10 +323,21 @@
 @media (prefers-reduced-motion: reduce) {
   .gm__tools-menu { animation: none; }
   .gm__tools-toggle .icon { transition: none; }
+  .restart-transition { animation-duration: .001s; }
 }
 
-/* The title's tiny settings/fullscreen buttons otherwise share the same expanded touch target. */
-.sp-coarse .title-conn { flex-wrap: wrap; }
+/* Keep connection/help centered; footer tools occupy their own row above the version label. */
+.title-conn { flex-wrap: wrap; gap: max(.1rem, 8px); }
+.title-conn__status { display: inline-flex; align-items: center; justify-content: center; gap: max(.1rem, 6px); white-space: nowrap; }
+.title-guide { white-space: nowrap; }
+.title-foot { gap: max(.18rem, 12px); }
+.title-foot__copyright { min-width: 0; overflow-wrap: anywhere; }
+.title-foot__right { display: flex; flex: 0 0 auto; flex-direction: column; align-items: flex-end; gap: max(.12rem, 9px); }
+.title-tools { display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-end; gap: max(.1rem, 8px); }
+.title-tools .title-settings,
+.title-tools .title-fs { flex: 0 0 auto; width: max(.4rem, 36px); height: max(.4rem, 36px); margin-left: 0; }
+.title-tools .fsbtn { display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; }
+.title-tools .fsbtn .icon { display: block; flex: 0 0 auto; margin: 0; }
 .sp-coarse .title-settings,
 .sp-coarse .title-fs {
   flex: 0 0 auto;
@@ -323,6 +345,13 @@
   height: max(.4rem, var(--tap-min));
 }
 .sp-coarse .title-guide { min-height: var(--tap-min); }
+@media (max-height: 360px) {
+  .title-main { margin-top: 0; }
+  .title-screen .emblem { margin-bottom: .12rem; }
+  .title-screen .emblem__svg { width: .75rem; height: .8rem; }
+  .title-screen .emblem__bracket { height: .9rem; }
+  .title-login { margin-top: .2rem; gap: .1rem; padding-top: .16rem; padding-bottom: .1rem; }
+}
 
 /* Explicit label boxes keep the voice selector centered instead of relying on native button baselines. */
 .set-voice button { display: flex; align-items: center; justify-content: center; padding: 0 .1rem; line-height: 1; }

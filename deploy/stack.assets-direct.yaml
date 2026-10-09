@@ -1,0 +1,50 @@
+name: stronghold-assets
+
+services:
+  assets:
+    image: nginx:stable-alpine
+    restart: unless-stopped
+    init: true
+    environment:
+      ASSET_PUBLIC_PATH: "${ASSET_PUBLIC_PATH:-}"
+      NGINX_ENVSUBST_FILTER: "^ASSET_PUBLIC_PATH$$"
+    ports:
+      - "${ASSET_BIND_IP:-0.0.0.0}:${ASSET_HTTP_PORT:-8081}:80"
+    volumes:
+      - type: bind
+        source: "${ASSET_BUNDLE_DIR:?Run project.py setup --asset-server or assets-export}"
+        target: /srv/stronghold-assets
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./nginx-assets.conf
+        target: /etc/nginx/nginx.conf
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./nginx-assets-http.conf.template
+        target: /etc/nginx/templates/default.conf.template
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./nginx-assets-routes.inc.template
+        target: /etc/nginx/templates/asset-routes.inc.template
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1$${ASSET_PUBLIC_PATH}/healthz/assets"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+    mem_limit: 128m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

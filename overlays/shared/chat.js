@@ -1,7 +1,7 @@
 // Team text chat is transient room traffic, separate from matches, emotes and replays.
 export const CHAT_MAX_LENGTH = 200;
 export const CHAT_COOLDOWN_MS = 1000;
-export const CHAT_CLOSED_PREVIEW_MS = 10_000;
+export const CHAT_CLOSED_PREVIEW_MS = 5_000;
 export const CHAT_HISTORY_LIMIT = 50;
 
 /** Core alliances available as a session-local player marker. Colors are UI constants, never client input. */

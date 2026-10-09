@@ -27,10 +27,15 @@ class DeploymentError(RuntimeError):
 
 _ENV_KEY = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z_0-9]*)\s*=")
 _MANAGED = {"STRONGHOLD_SOURCE_DIR", "STRONGHOLD_IMAGE", "VOICE_LANG",
-            "FETCH_ASSETS", "DEV_PORT", "LOCAL_ASSETS_DIR", "LOCAL_ASSETS_MANIFEST"}
+            "FETCH_ASSETS", "DEV_PORT", "LOCAL_ASSETS_DIR", "LOCAL_ASSETS_MANIFEST",
+            "ASSET_BUNDLE_DIR", "ASSET_PUBLIC_PATH", "ASSET_BIND_IP", "ASSET_HTTP_PORT",
+            "ASSET_HTTPS_PORT", "ASSET_TLS_CERT", "ASSET_TLS_KEY"}
 _SNAPSHOT_NAME = re.compile(r"\d{8}T\d{6}\.\d{6}Z")
 COMPOSE_FILES = {"tunnel": "stack.cf-tunnel.yaml", "nginx": "stack.nginx.yaml", "dev": "stack.dev.yaml"}
-GENERATED_FILES = (*COMPOSE_FILES.values(), "nginx.conf")
+ASSET_COMPOSE_FILES = ("stack.assets-direct.yaml", "stack.assets-https.yaml")
+GENERATED_FILES = (*COMPOSE_FILES.values(), "nginx.conf", *ASSET_COMPOSE_FILES,
+                   "nginx-assets.conf", "nginx-assets-http.conf.template",
+                   "nginx-assets-https.conf.template", "nginx-assets-routes.inc.template")
 LEGACY_COMPOSE_HASHES = {
     "compose.yaml": "69d8683cab127f33e11ddb7c599b41141c3ad1a04d02de7e939244c0b47295f7",
     "compose.dev.yaml": "bbcbc2ae3bbf891714aba176edfdd8b25e52da18edebbb9670f1845457d19de7",
@@ -88,9 +93,8 @@ def _quote(value):
     return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
-def _rewrite_env(text, updates):
-    """Preserve all unknown settings/comments without parsing or logging their values."""
-    output, remaining = [], dict(updates)
+def _env_blocks(text):
+    """Keep quoted multiline values together, including lines that resemble settings."""
     lines, index = text.splitlines(), 0
     while index < len(lines):
         line = lines[index]
@@ -118,6 +122,43 @@ def _rewrite_env(text, updates):
                 segment = lines[index]
                 block.append(segment)
                 index += 1
+        yield key, block
+
+
+def _runtime_setting(text, wanted, default=None):
+    """Read one literal public setting without expanding or exposing private values."""
+    result = default
+    for key, block in _env_blocks(text):
+        if key != wanted:
+            continue
+        if len(block) != 1:
+            raise DeploymentError(f"{wanted} must be a single-line literal setting")
+        match = _ENV_KEY.match(block[0])
+        value = block[0][match.end():].strip()
+        if value.startswith(("'", '"')):
+            quote = value[0]
+            # Docker dotenv permits escaped quotes in quoted literal paths.
+            pattern = r"^(['\"])((?:\\.|[^\\])*?)\1\s*(?:#.*)?$"
+            parsed = re.fullmatch(pattern, value)
+            if not parsed:
+                raise DeploymentError(f"{wanted} must be a literal setting")
+            value = re.sub(r"\\([\\'\"])", r"\1", parsed[2])
+            if quote == '"' and "$" in value:
+                raise DeploymentError(f"{wanted} must not use variable interpolation")
+        else:
+            value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
+            if "$" in value:
+                raise DeploymentError(f"{wanted} must not use variable interpolation")
+        if any(c in value for c in "\r\n\0"):
+            raise DeploymentError(f"{wanted} contains a forbidden control character")
+        result = value or default
+    return result
+
+
+def _rewrite_env(text, updates):
+    """Preserve all unknown settings/comments without parsing or logging their values."""
+    output, remaining = [], dict(updates)
+    for key, block in _env_blocks(text):
         if key in updates:
             if key in remaining:
                 output.append(f"{key}={_quote(remaining.pop(key))}")
@@ -554,8 +595,176 @@ def rollback(root, pin=None, source=None, *, backup=None):
     return {"restored": backup, "version": health.get("app"), "healthy": True}
 
 
-def setup(root, pin, source, *, archive=None, image=None, start=False):
+def _asset_references(document):
+    refs = set()
+
+    def walk(value):
+        if isinstance(value, dict):
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+        elif isinstance(value, str) and value.startswith(("/assets/", "/fonts/")):
+            refs.add(value)
+
+    walk(document)
+    return refs
+
+
+def _validate_asset_bundle(folder):
+    """Validate referenced media plus the published inventory before reusing a bundle."""
+    folder = Path(folder)
+    try:
+        metadata = json.loads((folder / ".bundle.json").read_text(encoding="utf-8"))
+        assets_manifest = json.loads((folder / "manifests/assets.json").read_text(encoding="utf-8"))
+        local_manifest = json.loads((folder / "manifests/local-assets.json").read_text(encoding="utf-8"))
+        package = json.loads((folder / "manifests/package.json").read_text(encoding="utf-8"))
+        if metadata.get("kind") != "stronghold-asset-bundle" or metadata.get("schemaVersion") != 2:
+            raise DeploymentError("Asset bundle metadata has an unsupported format")
+        if package.get("version") != metadata["identity"]["version"]:
+            raise DeploymentError("Asset image version differs from the pinned release")
+        inventory = metadata["files"]
+        refs = _asset_references(assets_manifest) | _asset_references(local_manifest)
+        if not refs or not any(p.startswith("/fonts/") for p in refs):
+            raise DeploymentError("Asset bundle has no complete media/font manifest; build with FETCH_ASSETS=1")
+        for lang in ("kr", "jp"):
+            voices = _asset_references(assets_manifest.get("audio", {}).get("voicePacks", {}).get(lang, {}))
+            if not voices or any(not p.startswith(f"/assets/audio/voice/{lang}/") for p in voices):
+                raise DeploymentError("Asset bundle requires complete KR and JP voice banks; run setup")
+        for url in refs:
+            parts = PurePosixPath(url).parts[1:]
+            if "\\" in url or ".." in parts or "?" in url or "#" in url or url[1:] not in inventory:
+                raise DeploymentError("An asset referenced by the image or local manifest is missing or unsafe")
+        for relative, entry in inventory.items():
+            parts = PurePosixPath(relative)
+            if (parts.is_absolute() or ".." in parts.parts or "\\" in relative
+                    or not parts.parts or parts.parts[0] not in {"assets", "fonts"}):
+                raise DeploymentError("Asset bundle inventory contains an unsafe path")
+            file = folder / relative
+            if (not file.is_file() or file.is_symlink() or not file.resolve().is_relative_to(folder.resolve())
+                    or file.stat().st_size != entry["bytes"] or entry["bytes"] <= 0
+                    or _sha(file) != entry["sha256"]):
+                raise DeploymentError("Asset bundle contains a missing, empty or changed file")
+        health = json.loads((folder / "healthz/assets").read_text(encoding="utf-8"))
+        if health.get("ok") is not True or health.get("bundle") != metadata["bundle"]:
+            raise DeploymentError("Asset bundle health metadata differs from its inventory")
+        return metadata
+    except (OSError, ValueError, KeyError, TypeError):
+        raise DeploymentError("Asset bundle manifests or inventory are missing or invalid") from None
+
+
+def export_asset_server(root, pin, source=None, *, image=None, output=None):
+    """Export all public assets from a built image; the temporary container is never started."""
+    root, service, templates = _paths(root)
+    local, manifest = _select_assets(root, pin)
+    service.mkdir(parents=True, exist_ok=True)
+    env_file = service / ".env"
+    original = env_file.read_text(encoding="utf-8") if env_file.is_file() else (templates / "env.example").read_text(encoding="utf-8")
+    prefix = _runtime_setting(original, "ASSET_PUBLIC_PATH", "")
+    if not re.fullmatch(r"(?:/[A-Za-z0-9_-]+)*", prefix):
+        raise DeploymentError("ASSET_PUBLIC_PATH must be empty or a path like /stronghold (no trailing slash)")
+    name = image_name(pin, image or _runtime_setting(original, "STRONGHOLD_IMAGE"))
+    target = output if output is not None else _runtime_setting(original, "ASSET_BUNDLE_DIR", "./assets/direct/current")
+    target = Path(target).expanduser()
+    if not target.is_absolute():
+        target = service / target
+    # Avoid deleting a symlink target or any application/runtime parent directory.
+    if target.is_symlink():
+        raise DeploymentError("Asset bundle destination must not be a symbolic link")
+    target = target.resolve()
+    if any(parent.is_relative_to(target) for parent in (root, service, source and Path(source).resolve() or root)):
+        raise DeploymentError("Asset bundle destination must not contain the project, service or source directory")
+    if target.exists() and not target.is_dir():
+        raise DeploymentError("Asset bundle destination must be a directory")
+    if target.is_dir() and any(target.iterdir()):
+        try:
+            previous = json.loads((target / ".bundle.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raise DeploymentError("Nonempty destination is not a generated asset bundle; it was preserved") from None
+        if previous.get("kind") != "stronghold-asset-bundle":
+            raise DeploymentError("Nonempty destination is not a generated asset bundle; it was preserved")
+    image_id = _run(["docker", "image", "inspect", "--format", "{{.Id}}", name]).strip()
+    if not re.fullmatch(r"sha256:[a-f0-9]{64}", image_id):
+        raise DeploymentError("Built image identity is unavailable; run setup before assets-export")
+    identity = {"image_id": image_id, "upstream": pin["commit"], "version": pin["version"],
+                "release_sha256": pin["release"]["sha256"], "local_manifest_sha256": _sha(manifest)}
+    reused = False
+    if (target / ".bundle.json").is_file():
+        try:
+            metadata = _validate_asset_bundle(target)
+            reused = metadata.get("identity") == identity
+        except DeploymentError:
+            # It is our generated directory: replace a damaged bundle only after validating a fresh export.
+            reused = False
+    if not reused:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        stage = Path(tempfile.mkdtemp(prefix=f".{target.name}.export-", dir=target.parent))
+        container, retired = None, None
+        try:
+            container = _run(["docker", "create", "--network", "none", name]).strip()
+            if not re.fullmatch(r"[a-f0-9]{64}", container):
+                raise DeploymentError("Temporary image container could not be created")
+            (stage / "assets").mkdir()
+            (stage / "fonts").mkdir()
+            (stage / "manifests").mkdir()
+            _run(["docker", "cp", f"{container}:/app/public/assets/.", stage / "assets"])
+            _run(["docker", "cp", f"{container}:/app/public/fonts/.", stage / "fonts"])
+            _run(["docker", "cp", f"{container}:/app/data/assets.json", stage / "manifests/assets.json"])
+            _run(["docker", "cp", f"{container}:/app/package.json", stage / "manifests/package.json"])
+            if (stage / "assets/local").exists():
+                shutil.rmtree(stage / "assets/local")
+            shutil.copytree(local, stage / "assets/local", symlinks=True)
+            shutil.copyfile(manifest, stage / "manifests/local-assets.json")
+            inventory = {}
+            for file in sorted(stage.rglob("*")):
+                if file.is_symlink():
+                    raise DeploymentError("Asset bundle must not contain symbolic links")
+                file.chmod(0o755 if file.is_dir() else 0o644)
+                relative = file.relative_to(stage).as_posix()
+                if file.is_file() and relative.startswith(("assets/", "fonts/")):
+                    inventory[relative] = {"bytes": file.stat().st_size, "sha256": _sha(file)}
+            bundle_id = hashlib.sha256(json.dumps({"identity": identity, "files": inventory}, sort_keys=True).encode()).hexdigest()
+            metadata = {"schemaVersion": 2, "kind": "stronghold-asset-bundle", "bundle": bundle_id,
+                        "identity": identity, "files": inventory}
+            _json(stage / ".bundle.json", metadata)
+            _json(stage / "healthz/assets", {"ok": True, "app": pin["version"], "bundle": bundle_id,
+                                            "files": len(inventory), "bytes": sum(v["bytes"] for v in inventory.values())})
+            _validate_asset_bundle(stage)
+            stage.chmod(0o755)
+            if target.exists():
+                retired = Path(tempfile.mkdtemp(prefix=f".{target.name}.retired-", dir=target.parent))
+                retired.rmdir()
+                os.replace(target, retired)
+            try:
+                os.replace(stage, target)
+            except OSError:
+                if retired is not None:
+                    os.replace(retired, target)
+                    retired = None
+                raise
+        finally:
+            try:
+                if container is not None:
+                    _run(["docker", "rm", "-f", container])
+            finally:
+                if stage.exists():
+                    shutil.rmtree(stage)
+                if retired is not None and retired.exists():
+                    shutil.rmtree(retired)
+    for filename in ASSET_COMPOSE_FILES + tuple(name for name in GENERATED_FILES if name.startswith("nginx-assets")):
+        _atomic(service / filename, (templates / filename).read_text(encoding="utf-8"))
+    _atomic(env_file, _rewrite_env(original, {"ASSET_BUNDLE_DIR": target}), private=True)
+    return {"bundle_directory": str(target), "bundle": metadata["bundle"], "reused": reused,
+            "files": len(metadata["files"]), "bytes": sum(v["bytes"] for v in metadata["files"].values()),
+            "compose": str(service / ASSET_COMPOSE_FILES[0]), "https_override": str(service / ASSET_COMPOSE_FILES[1]),
+            "health_path": f"{prefix}/healthz/assets"}
+
+
+def setup(root, pin, source, *, archive=None, image=None, start=False, asset_server=False, asset_output=None):
     """Finish initial setup so the generated service can be managed with Docker Compose."""
+    if asset_output is not None and not asset_server:
+        raise DeploymentError("--asset-output requires --asset-server")
     prepared = assets(root, pin, archive=archive)
     built = build(root, pin, source, image=image)
     configured = configure(root, pin, source, image=image)
@@ -563,6 +772,8 @@ def setup(root, pin, source, *, archive=None, image=None, start=False):
     result = {"assets": prepared, "build": built, "configuration": configured,
               "service_directory": str(service), "compose": str(service / COMPOSE_FILES["tunnel"]),
               "compose_choices": {key: str(service / filename) for key, filename in COMPOSE_FILES.items()}}
+    if asset_server:
+        result["asset_server"] = export_asset_server(root, pin, source, image=built["image"], output=asset_output)
     if start:
         result["service"] = up(root, pin, source)
         result["verification"] = verify(root, pin, source)
@@ -571,7 +782,8 @@ def setup(root, pin, source, *, archive=None, image=None, start=False):
 
 def dispatch(action, root, pin, source=None, **options):
     actions = {"assets": assets, "build": build, "configure": configure, "setup": setup,
-               "up": up, "down": down, "status": status, "verify": verify, "rollback": rollback}
+               "up": up, "down": down, "status": status, "verify": verify, "rollback": rollback,
+               "assets-export": export_asset_server}
     if action not in actions:
         raise DeploymentError(f"Unknown deployment action: {action}")
     if action == "assets":

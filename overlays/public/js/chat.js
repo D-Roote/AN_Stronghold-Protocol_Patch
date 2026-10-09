@@ -62,6 +62,11 @@ export function installTeamChat({ net, store, target = chatStore, now = Date.now
       playerId: msg.playerId, name: msg.name, faction, at: msg.at, receivedAt: now() });
     if (added) target.set((state) => ({ factions: { ...(state.factions || {}), [msg.playerId]: faction } }));
   });
+  const offRestart = net.on('room.restart', (msg) => {
+    if (!validEnvelope(msg)) return;
+    append({ id: `${msg.code}:${msg.seq}`, kind: 'restart', code: msg.code, seq: msg.seq,
+      playerId: msg.playerId, name: msg.name, at: msg.at, receivedAt: now() });
+  });
   const request = async (type, fields) => {
     const state = target.get();
     let error = null;
@@ -96,7 +101,7 @@ export function installTeamChat({ net, store, target = chatStore, now = Date.now
     dispose() {
       if (disposed) return;
       disposed = true;
-      offStore(); offChat(); offFaction(); reset();
+      offStore(); offChat(); offFaction(); offRestart(); reset();
       if (installed === controller) installed = null;
     },
   };

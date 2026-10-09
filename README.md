@@ -22,6 +22,7 @@
 | tests/ | 자체 구성 스크립트의 테스트 |
 
 기본 한국어, 에셋 사전 다운로드, 팀 텍스트 채팅과 접이식 메뉴를 추가합니다.
+정보 확인 단계에서도 채팅할 수 있으며, 사람 팀원 전원이 재시작에 찬성하면 금지 정보를 다시 뽑습니다.
 서비스의 추가 AI 팀원은 방마다 최대 1명으로 제한합니다.
 일부 UI 기계번역은 아직 남아 있습니다.
 한국어·일본어 음성을 함께 빌드하며, 설정의 **오퍼레이터 음성 언어**에서 선택합니다.
@@ -47,6 +48,20 @@ docker compose -f stack.cf-tunnel.yaml ps
 | `service/stack.cf-tunnel.yaml` | 기존 Cloudflare Tunnel, 앱은 localhost:3000 |
 | `service/stack.nginx.yaml` | nginx 역방향 프록시, 기본 HTTP 80 |
 | `service/stack.dev.yaml` | 별도 개발 서버, localhost:3100 |
+
+홈서버에 게임 없이 nginx 에셋 서버만 구성할 수 있습니다. 이미지의 에셋·폰트·KR/JP 음성과
+검증된 로컬 에셋을 함께 추출하며 다운로드 주소와 경로는 환경 설정으로 바꿀 수 있습니다.
+
+~~~bash
+python3 scripts/project.py setup --asset-server
+cd service
+docker compose -f stack.assets-direct.yaml up -d
+~~~
+
+기본 HTTP 포트는 8081이고 헬스 체크는 `/healthz/assets`입니다. 직접 HTTPS로 제공할 때는
+인증서 경로를 지정하고 `stack.assets-https.yaml`을 함께 사용합니다.
+준비된 이미지의 에셋만 다시 추출할 때는 `python3 scripts/project.py assets-export`를 사용합니다.
+전체 절차와 설정은 [에셋 서버 안내](docs/DEPLOY_KO.md#직접-nginx-에셋-서버)에 있습니다.
 
 nginx를 선택하면 위 명령의 파일명을 `stack.nginx.yaml`로 바꿉니다.
 게이트웨이를 전환할 때는 기존 구성으로 `down`한 뒤 새 구성으로 `up -d`합니다.

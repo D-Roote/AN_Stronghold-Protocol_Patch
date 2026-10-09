@@ -1,0 +1,264 @@
+diff --git a/public/js/main.js b/public/js/main.js
+index 3eac5cc42273d17f2f9a27341e028bf9a8e844f9..25b34132ab2353f0afdd2603b1c76d1ec0f9dee8 100644
+--- a/public/js/main.js
++++ b/public/js/main.js
+@@ -47,6 +47,7 @@ import { GameScreen } from './screens/game.js';
+ import { installAudio } from './audio.js';
+ import { installTeamChat } from './chat.js';
+ import { AssetPrefetchHost } from './ui/assetPrefetch.js';
++import { RestartTransitionHost } from './ui/restartVote.js';
+ import { settingsStore } from './ui/settings.js';
+ import { GuideHost } from './ui/guide.js';
+ import { installDeviceSupport } from './ui/device.js';
+@@ -185,7 +186,7 @@ function onRoomState(msg) {
+   }
+   const prevRoom = store.get().room;
+   // A (new) match starts: forget the previous match's state so stale results never show.
+-  if (room.inMatch && !(prevRoom && prevRoom.inMatch && prevRoom.code === room.code)) store.set({ match: emptyMatch() });
++  if (room.inMatch && !(prevRoom && prevRoom.inMatch && prevRoom.code === room.code && prevRoom.matchNo === room.matchNo)) store.set({ match: emptyMatch() });
+   store.set({ room });
+   if (room.mode === 'coop' && typeof room.code === 'string') rememberRoom(room.code);
+   maybeFinishRestore();
+@@ -290,6 +291,7 @@ function App() {
+     <${GuideHost} />
+     <${LoadoutHost} />
+     <${AssetPrefetchHost} />
++    <${RestartTransitionHost} />
+   </div>`;
+ }
+ 
+diff --git a/public/js/screens/briefing.js b/public/js/screens/briefing.js
+index 582bac3e19cbd478b3e1f6b7aab1beab52a56718..c06c1d65df3e73f5e22bebfb8f510808b3e69a63 100644
+--- a/public/js/screens/briefing.js
++++ b/public/js/screens/briefing.js
+@@ -17,6 +17,9 @@ import { enemyIconUrl, factionIconUrl } from '../ui/assetUrls.js';
+ import { useStore } from '../store.js';
+ import { data } from '../data.js';
+ import { t, tParts } from '../../../shared/i18n.js';
++import { TeamChat } from '../ui/teamChat.js';
++import { canTeamChat } from '../chat.js';
++import { BriefingRestartVote } from '../ui/restartVote.js';
+ 
+ const cx = (...p) => p.flat().filter(Boolean).join(' ');
+ 
+@@ -25,10 +28,13 @@ export function BriefingScreen() {
+   const pub = useStore((s) => s.match.public);
+   const priv = useStore((s) => s.match.private);
+   const myId = useStore((s) => s.me.playerId);
++  const room = useStore((s) => s.room);
++  const online = useStore((s) => s.connection.status === 'online');
+   const solo = useStore((s) => s.room?.mode === 'solo') || String(pub?.modeId || '').includes('single');
+   const gd = useGameData();
+   const [exit, setExit] = useState(false);
+   const [busy, setBusy] = useState(false);
++  const [chatOpen, setChatOpen] = useState(false);
+   if (!pub) return null;
+ 
+   const players = sortedPlayers(pub);
+@@ -93,6 +99,7 @@ export function BriefingScreen() {
+     </main>
+     <footer class="brief__foot">
+       <${LoadoutButton} from="briefing" size="lg" class="brief-loadout" />
++      <${BriefingRestartVote} />
+       <div class="brief-ready">
+         <span class="brief-ready__txt">${t('已就绪')} <b class="num">${readyN}</b><span class="num">/${players.length}</span></span>
+         <span class="brief-ready__pips">${players.map((p) => html`<i key=${p.playerId} class=${cx(p.ready && 'on', p.playerId === myId && 'me')} title=${p.name}><${Icon} name="user" /></i>`)}</span>
+@@ -100,6 +107,8 @@ export function BriefingScreen() {
+       <${Button} variant="primary" size="xl" icon=${me?.ready ? 'check' : me ? 'play' : 'eye'} active=${!!me?.ready} loading=${busy}
+         disabled=${!!me?.ready || !me} onClick=${ready}>${me?.ready ? t('已就绪') : me ? t('准备就绪') : t('观战中')}<//>
+     </footer>
++    ${canTeamChat(room, myId) ? html`<div class="phase-chat phase-chat--brief"><${TeamChat} key=${room.code}
++      playerId=${myId} online=${online} open=${chatOpen} onToggle=${setChatOpen} /></div>` : null}
+     <${ExitModal} open=${exit} onClose=${() => setExit(false)} solo=${solo} />
+   </div>`;
+ }
+diff --git a/server/lobby.js b/server/lobby.js
+index 3956f36bc639d13e1e2ed98060aca97cb65b27ba..e3b1b2e3bcc0c4849b79e146137d5617b3c53d40 100644
+--- a/server/lobby.js
++++ b/server/lobby.js
+@@ -97,11 +97,12 @@
+ import { randomBytes, randomInt } from 'node:crypto';
+-import { ERR, MAX_SEATS, MAX_SPECTATORS, ROOM_CODE_LEN, modeIdFor } from '../shared/constants.js';
++import { ERR, PHASE, MAX_SEATS, MAX_SPECTATORS, ROOM_CODE_LEN, modeIdFor } from '../shared/constants.js';
+ import { checkLoadout, checkNotOwned, checkDiyPicks } from '../shared/protocol.js';
+ import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
+ import { getData as defaultGetData, lookup } from './data.js';
+ import { Match as DefaultMatch } from './match/Match.js';
+ import { KITTED_CHARS } from './sim/content/kits/index.js';
+ import { CHAT_COOLDOWN_MS, normalizeChatText, normalizeChatFaction } from '../shared/chat.js';
++import { restartVoteState, voteRestart, syncRestartVote, clearRestartVote } from './restartVote.js';
+ 
+ /** Room code alphabet: uppercase letters without I and O (and no digits, so no 0/1). */
+ export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+@@ -214,6 +215,7 @@ export class Room {
+           ...(s.faction ? { faction: s.faction } : {}) }
+         : null)),
+       spectators: this.spectators.map((s) => ({ playerId: s.playerId, name: s.name, connected: s.connected })),
++      ...restartVoteState(this),
+     };
+   }
+ }
+@@ -321,6 +323,7 @@ export class Lobby {
+       case 'room.leave': return this.leave(session);
+       case 'room.chat': return this.chat(session, msg);
+       case 'room.faction': return this.faction(session, msg);
++      case 'room.restartVote': return voteRestart(this, session, msg);
+       case 'room.ready': return this.ready(session, msg);
+       case 'room.setDifficulty': return this.setDifficulty(session, msg);
+       case 'room.addBot': return this.addBot(session);
+@@ -710,7 +713,7 @@ export class Lobby {
+   // ---------------------------------------------------------------------------------------------------
+ 
+   /** @param {Room} room @param {string | null} [key] per-network limit key of the starter */
+-  startMatch(room, key = null) {
++  startMatch(room, key = null, restart = null) {
+     const host = room.seatOf(room.hostId);
+-    if (host) host.ready = true;
++    if (host && !restart) host.ready = true;
+     const seats = room.seats.filter(Boolean).map((s) => ({
+@@ -736,6 +739,7 @@ export class Lobby {
+         // the spectator seats (header): watched like eliminated players, never players
+         spectators: room.spectators.map((s) => s.playerId),
+         seed,
++        previousDisabledBonds: restart?.previousDisabledBonds,
+         // the room's match number: with the seed it keeps battleIds unique across the room's matches (DESIGN §14)
+         matchNo: room.matchCount + 1,
+         data: this.safeData(),
+@@ -755,6 +759,7 @@ export class Lobby {
+       this.broadcastState(room);
+       match.start();
++      if (room.match === match && match.phase === PHASE.INFO_CHECK) this.broadcastState(room);
+     } catch (e) {
+       this.log.error(`[lobby] ${room.code} match failed to start`, e);
+       if (room.matchCtx === ctx) { room.match = null; room.matchCtx = null; room.matchKey = null; }
+       this.disposeMatchCtx(ctx);
+@@ -767,6 +772,7 @@ export class Lobby {
+   /** onEnd callback: return the room to LOBBY and dispose the match on the next macrotask. */
+   onMatchEnd(room, ctx, summary) {
+     if (ctx.ended || !ctx.live || room.matchCtx !== ctx || room.disposed) return;
++    clearRestartVote(room);
+     ctx.ended = true;
+     room.lastSummary = summary ?? null;
+     room.match = null;
+@@ -802,7 +807,10 @@ export class Lobby {
+   matchBroadcast(room, ctx, msg) {
+     const data = this.broadcastRoom(room, msg);
+     if (data == null) return;
+-    if (msg.t === 'm.public') ctx.lastPublic = data;
++    if (msg.t === 'm.public') {
++      ctx.lastPublic = data;
++      if (syncRestartVote(this, room)) this.broadcastState(room);
++    }
+     else if (msg.t === 'm.result') ctx.sharedResult = data;
+   }
+ 
+@@ -1064,6 +1072,7 @@ export class Lobby {
+    */
+   disposeRoom(room, reason) {
+     if (room.disposed) return;
++    clearRestartVote(room);
+     room.disposed = true;
+     if (this.rooms.get(room.code) === room) this.rooms.delete(room.code);
+     const ctx = room.matchCtx;
+@@ -1118,6 +1127,7 @@ export class Lobby {
+ 
+   broadcastState(room) {
+     if (room.disposed) return;
++    syncRestartVote(this, room);
+     const data = encode(room.toState());
+     for (const session of this.memberSessions(room)) sendRaw(session.ws, data);
+   }
+diff --git a/server/match/Match.js b/server/match/Match.js
+index b95e5bb4f2a1b5ecc1831e323a145cb8c32b6ccf..0b5238184e3f02be68dc97ae8b3274690ab3dbef 100644
+--- a/server/match/Match.js
++++ b/server/match/Match.js
+@@ -170,7 +170,8 @@ import { DataSource } from '../sim/simdata.js';
+ import { createRng, deriveSeed } from '../sim/rng.js';
+ import { GameData } from './gamedata.js';
+ import { RealScheduler } from './scheduler.js';
+-import { SharedPool, drawDisabledBonds } from './pool.js';
++import { SharedPool } from './pool.js';
++import { drawRestartBans } from './restartBans.js';
+ import { PlayerState } from './PlayerState.js';
+ import { EffectDispatcher, getDefaultRegistry } from './effectsMeta.js';
+ import { setupMatchWaves } from './waves.js';
+@@ -316,7 +317,7 @@ export class Match {
+     this.factions = setup.factions;
+     this.bossId = setup.bossId;
+     this.hiddenBossId = setup.hiddenBossId;
+-    const bans = drawDisabledBonds(this.gd, this.rngSetup);
++    const bans = drawRestartBans(this.gd, this.rngSetup, opts.previousDisabledBonds);
+     this.disabledBonds = bans.drawn;
+     this.staticInactiveBonds = bans.staticOff;
+     this.bannedChess = bans.banned;
+@@ -327,6 +328,7 @@ export class Match {
+     for (const ps of this.order) ps.initDiyStock(off);
+ 
+     this.phase = PHASE.LOBBY;
++    this.restartPending = false;
+     this.round = 0;
+     this.deadline = 0;
+     /** Final Assault / Hidden Core: ms epoch when the overtime drain starts (m.public.overtimeAt) */
+diff --git a/server/match/match/intents.js b/server/match/match/intents.js
+index 7a96823f1401774e579f20bcc5bdae7be829df30..93ac3e0b8953d9083928dffae5e4c1931bfc8c1c 100644
+--- a/server/match/match/intents.js
++++ b/server/match/match/intents.js
+@@ -13,7 +13,7 @@ export class MatchIntents {
+   _handle(ps, msg) {
+     switch (msg.t) {
+       case 'g.infoReady':
+-        if (this.phase !== PHASE.INFO_CHECK) return fail(ERR.WRONG_PHASE);
++        if (this.phase !== PHASE.INFO_CHECK || this.restartPending) return fail(ERR.WRONG_PHASE);
+         if (!ps.infoReady) { ps.infoReady = true; this.markPublic(); this.maybeEndInfo(); }
+         return OK;
+       case 'g.band': return this.pickBand(ps, msg.bandId);
+diff --git a/server/match/match/phases.js b/server/match/match/phases.js
+index 58043952d42a4941c3192c4e0aa79f1a4354b3d7..e8a615f85227653e0be728a071357eeec4378cdd 100644
+--- a/server/match/match/phases.js
++++ b/server/match/match/phases.js
+@@ -38,7 +38,7 @@ export class MatchPhases {
+    * (timeoutBand). Solo, and any single-human match (soloUntimed): untimed. Solo also keeps seat order and has no skip.
+    */
+   enterBandDraft() {
+-    if (this.phase !== PHASE.INFO_CHECK) return;
++    if (this.phase !== PHASE.INFO_CHECK || this.restartPending) return;
+     this.phase = PHASE.BAND_DRAFT;
+     const order = this.order.map((p) => p.playerId);
+     if (!this.isSolo) this.rngDraft.shuffle(order);
+diff --git a/shared/protocol.js b/shared/protocol.js
+index 5fd2a3ab2a7adbeaa70403c22edea2c44ed70762..e7282a34dccd91380c4848e2b6e4eb44f389dc04 100644
+--- a/shared/protocol.js
++++ b/shared/protocol.js
+@@ -326,6 +326,7 @@ export const C2S = {
+   'room.leave': {},
+   'room.chat': { text: (v) => normalizeChatText(v) !== null },
+   'room.faction': { faction: (v) => normalizeChatFaction(v) !== null },
++  'room.restartVote': { agree: isBool, matchNo: (v) => isInt(v, 1, Number.MAX_SAFE_INTEGER) },
+   'room.ready': { ready: isBool },
+   'room.setDifficulty': { difficulty: (v) => DIFFICULTIES.includes(v) },
+   'room.addBot': {},
+@@ -399,7 +400,7 @@ export const C2S = {
+ // Server → client message types (documentation + client dispatch table keys).
+ export const S2C = [
+   'welcome', 'ok', 'error', 'pong',
+-  'room.state', 'room.closed', 'room.chat', 'room.faction',
++  'room.state', 'room.closed', 'room.chat', 'room.faction', 'room.restart',
+   'm.public', 'm.private', 'm.field', 'm.toast', 'm.ticker', 'm.emote', 'm.result',
+   // m.unitStats { seq, round, units: [unitStatsEntry] } — the answer to g.unitStats (the requester only)
+   'm.unitStats',
+diff --git a/public/i18n/en.json b/public/i18n/en.json
+index c84833e2c2f86cb347910d448031c6cdf5ed6be6..22df77621e6b529b2eaf1572df72b709a8ff4208 100644
+--- a/public/i18n/en.json
++++ b/public/i18n/en.json
+@@ -1109,6 +1109,11 @@
+   "{name}博士选择了{faction}阵营": "{name} chose the {faction} faction.",
+   "干员配音语言": "Operator voice language",
+   "所选语言没有该干员的语音时保持静音。": "Operators without voices in the selected language remain silent.",
++  "关闭聊天后，消息将在5秒后隐藏": "Messages fade 5 seconds after closing chat",
++  "重启投票": "Restart vote",
++  "重启 {n} / {total}": "Restart {n} / {total}",
++  "重启投票发送失败，请重试": "Could not send the restart vote. Please try again.",
++  "{name}博士请求重新开始模拟。": "{name} requested a vote to restart the simulation.",
+   "表情与阵营": "Emotes and factions",
+   "选择阵营": "Choose a faction",
+   "表情功能稍后提供": "Emotes will be added later",

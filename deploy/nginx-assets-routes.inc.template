@@ -1,0 +1,31 @@
+# Only ASSET_PUBLIC_PATH is expanded by the image entrypoint; nginx variables stay intact.
+set $asset_success_cache "public, max-age=3600";
+add_header Cache-Control $asset_cache_control always;
+add_header Access-Control-Allow-Origin "*" always;
+add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
+add_header Access-Control-Allow-Headers "Range, If-None-Match, If-Modified-Since" always;
+add_header Access-Control-Expose-Headers "Accept-Ranges, Content-Length, Content-Range, Content-Type, ETag" always;
+add_header Access-Control-Max-Age "86400" always;
+
+if ($request_method = OPTIONS) { return 204; }
+if ($request_method !~ ^(GET|HEAD|OPTIONS)$) { return 405; }
+
+location = ${ASSET_PUBLIC_PATH}/healthz/assets {
+    set $asset_success_cache "no-store";
+    rewrite ^${ASSET_PUBLIC_PATH}(/.*)$ $1 break;
+    default_type application/json;
+    try_files $uri =404;
+}
+location ^~ ${ASSET_PUBLIC_PATH}/assets/ {
+    rewrite ^${ASSET_PUBLIC_PATH}(/.*)$ $1 break;
+    try_files $uri =404;
+}
+location ^~ ${ASSET_PUBLIC_PATH}/fonts/ {
+    rewrite ^${ASSET_PUBLIC_PATH}(/.*)$ $1 break;
+    try_files $uri =404;
+}
+location ^~ ${ASSET_PUBLIC_PATH}/media/ {
+    rewrite ^${ASSET_PUBLIC_PATH}/media/(.*)$ /assets/audio/$1 break;
+    try_files $uri $asset_audio_stem.mp3 $asset_audio_stem.m4a $asset_audio_stem.aac $asset_audio_stem.ogg $asset_audio_stem.oga $asset_audio_stem.opus $asset_audio_stem.wav =404;
+}
+location / { return 404; }

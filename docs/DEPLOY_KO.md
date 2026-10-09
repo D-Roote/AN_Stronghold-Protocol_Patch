@@ -46,7 +46,7 @@ nginx 구성은 token을 사용하지 않는다.
 이미지 이름, 한국어 음성 설정과 경로는 configure가 생성한다. .env 권한은 600이다.
 루트 .env는 service/.env로 연결하여 IDE에서 같은 파일을 사용할 수 있다.
 
-service/의 stack.*.yaml과 nginx.conf는 생성 파일이다. 템플릿은 deploy/에서 수정하고 setup으로 반영한다.
+service/의 stack.*.yaml과 nginx*.conf 및 *.template는 생성 파일이다. 템플릿은 deploy/에서 수정하고 setup으로 반영한다.
 기본 이름의 compose.yaml은 생성하지 않으므로 항상 -f로 실행할 구성을 선택한다.
 이전 생성본과 동일한 compose.yaml/compose.dev.yaml은 configure가 제거한다.
 사용자가 수정한 이전 파일은 덮어쓰지 않고 중단하므로 다른 파일명으로 옮긴 뒤 재실행한다.
@@ -92,7 +92,7 @@ restart는 기존 컨테이너를 다시 시작한다. 새 이미지나 환경 �
 | stack.nginx.yaml | 앱 + nginx 역방향 프록시 | 기본 HTTP 80 |
 | stack.dev.yaml | 별도 개발 앱 | localhost:3100 |
 
-세 파일은 각각 독립된 실행 구성이므로 함께 병합하지 않는다. 운영 두 구성은 동일한 stronghold
+위 세 파일은 각각 독립된 실행 구성이므로 함께 병합하지 않는다. 운영 두 구성은 동일한 stronghold
 프로젝트와 앱 포트를 사용한다. 전환할 때 현재 게이트웨이를 먼저 종료한다.
 
 ~~~bash
@@ -121,6 +121,76 @@ nginx는 워커 1개, 메모리 128MB와 CPU 0.25로 제한한다. 모든 구성
 해당 서버 아키텍처의 이미지를 빌드한다. 생성 소스와 service 에셋 경로는 새 환경에서 자동 구성된다.
 기존 PC의 절대 경로를 담은 생성 Compose 파일을 복사하는 대신 새 서버의 deploy 템플릿을 사용한다.
 현재 작업은 이전용 구성을 준비하는 범위이며 실제 Oracle VM 이전은 수행하지 않았다.
+
+## 직접 nginx 에셋 서버
+
+게임 서버와 별도인 `stronghold-assets` 프로젝트로 nginx만 실행한다. CF Tunnel과 Node 서버는
+필요하지 않으며 `stack.assets-direct.yaml`을 사용한다. `setup --asset-server`는 일반 준비 작업 뒤에
+이미지의 `public/assets`, `public/fonts`와 같은 버전의 검증된 로컬 에셋을 완전한 번들로 추출한다.
+한국어·일본어 음성도 포함된다. 이미지 추출용 컨테이너는 시작하지 않고 작업 후 제거한다.
+모든 manifest 참조와 파일 해시를 확인한 후 교체하며 복구본을 남기지 않는다.
+
+~~~bash
+# 최초 준비: 게임과 에셋 서버 구성을 준비하지만 서버는 시작하지 않음
+python3 scripts/project.py setup --asset-server
+
+# 이미지를 이미 준비한 경우에는 추출만 실행
+python3 scripts/project.py assets-export
+
+cd service
+docker compose -f stack.assets-direct.yaml up -d --wait
+docker compose -f stack.assets-direct.yaml ps
+docker compose -f stack.assets-direct.yaml logs -f
+~~~
+
+기본 번들 경로는 `service/assets/direct/current`다. 해당 경로와 모든 추출 파일은 Git 제외다.
+`assets-export --output /절대/경로` 또는 `service/.env`의 `ASSET_BUNDLE_DIR`로 바꿀 수 있다.
+상대 번들 경로는 service/ 기준이며, 추출 후 실제 절대 경로를 .env에 기록한다.
+같은 이미지와 파일을 재사용할 때는 추출을 생략한다. 일반 사용자 디렉터리를 덮어쓰지 않는다.
+
+| service/.env 설정 | 의미와 기본값 |
+| --- | --- |
+| ASSET_BUNDLE_DIR | 검증된 전체 번들 경로, 추출 스크립트가 기록 |
+| ASSET_BIND_IP | nginx 바인딩 주소, `0.0.0.0` |
+| ASSET_HTTP_PORT | HTTP 포트, `8081` |
+| ASSET_PUBLIC_PATH | URL 앞 경로, 기본 빈 값. 예: `/stronghold` |
+| ASSET_HTTPS_PORT | 직접 TLS 포트, `443` |
+| ASSET_TLS_CERT | 전체 인증서 체인 PEM 파일 경로 |
+| ASSET_TLS_KEY | 해당 인증서의 개인 키 PEM 파일 경로 |
+
+`ASSET_PUBLIC_PATH`는 영문·숫자·`_`·`-`로 구성한 경로를 사용하고 끝 `/`는 붙이지 않는다.
+예를 들어 `/stronghold`면 `/stronghold/assets/...`, `/stronghold/fonts/...`,
+`/stronghold/media/...`, `/stronghold/healthz/assets`로 제공한다. 도메인은 nginx에 고정하지 않는다.
+`/media/`는 게임과 같은 확장자 없는 음성 요청을 지원하며 Range/206·ETag·CORS를 제공한다.
+게임 HTML, JavaScript, 데이터 API 및 WebSocket 경로는 제공하지 않는다.
+헬스 응답은 `ok`, 앱 버전 및 번들 ID를 포함하고 캐시하지 않는다.
+
+현재 다운로드 클라이언트는 게임 서버 주소를 사용한다. 이 Compose를 실행하거나 DNS만 변경해도
+별도 에셋 서버를 자동 선택하지는 않는다. 브라우저의 우선 서버 선택·장애 시 게임 서버 재시도는
+별도 다운로드 라우팅 작업이 필요하다. 이 구성은 그 기능에서 사용할 수 있는 정적 서버를 준비한다.
+
+기존 HTTPS 역방향 프록시를 사용한다면 HTTP 8081로 전달한다. 홈서버 nginx에서 직접 TLS를
+종료하려면 인증서 파일을 준비해 .env의 인증서 경로를 지정하고 다음 두 파일을 함께 사용한다.
+[nginx TLS 설정](https://nginx.org/en/docs/http/ngx_http_ssl_module.html)을 따른다.
+
+~~~bash
+cd service
+docker compose -f stack.assets-direct.yaml -f stack.assets-https.yaml up -d --wait
+~~~
+
+TLS 구성은 HTTP의 에셋 요청을 HTTPS로 이동시키며 HTTP 헬스 체크는 유지한다.
+DNS·포트 포워딩·인증서 발급 및 갱신은 사용 환경에서 설정한다. 인증서 파일이 교체되면 같은 Compose로
+`up -d --force-recreate --wait`를 실행해 새 파일을 마운트한다. HTTPS 게임의 브라우저에서 이용하려면 에셋 서버도
+HTTPS 주소로 제공한다.
+
+패치나 원본을 업데이트하면 `setup --asset-server` 또는 이미지 빌드 후 `assets-export`를 다시 실행한다.
+번들 디렉터리를 교체하므로 실행 중 에셋 서버는 다음 명령으로 마운트를 새로 연결한다.
+
+~~~bash
+cd service
+docker compose -f stack.assets-direct.yaml up -d --force-recreate --wait
+# 직접 TLS 구성이라면 위 명령에도 -f stack.assets-https.yaml을 추가
+~~~
 
 ## 추가 한글화와 기타 수정
 
@@ -160,7 +230,7 @@ prepare는 원본 값이 base 또는 이미 교정된 value와 같을 때만 적
 ~~~bash
 python3 scripts/project.py prepare
 # .build/Stronghold-Protocol 안의 필요한 소스 파일 편집
-python3 scripts/project.py capture --path server/index.js --name 03-005-Feat-my-change.patch
+python3 scripts/project.py capture --path server/index.js --name 03-006-Feat-my-change.patch
 python3 scripts/project.py prepare
 ~~~
 
@@ -176,10 +246,12 @@ python3 scripts/project.py prepare
 | 01-002 | Build-japanese-voice-pack | KR/JP 음성팩 동시 준비와 검사 |
 | 02-001 | UI-korean-first-visit | 최초 한국어와 언어 검사 |
 | 02-002 | UI-mobile-orientation-ko | 모바일 회전 안내 |
+| 02-003 | UI-title-controls | 이름 화면 가운데 상태·설명, 우하단 설정·전체화면 |
 | 03-001 | Feat-asset-prefetch | 에셋 사전 다운로드 |
 | 03-002 | Feat-team-chat | 기본 채팅과 접이식 메뉴 |
 | 03-003 | Feat-session-chat-factions | 세션 채팅·진영·전략 선택 UI |
 | 03-004 | Feat-voice-language | 설정의 음성 언어 선택과 재생 전환 |
+| 03-005 | Feat-briefing-restart-vote | 정보 확인 채팅·전원 재시작 투표 |
 | 04-001 | Resource-ai-teammate-limit | 방별 추가 AI 제한 |
 
 capture에는 해당 분류의 가장 큰 번호에 1을 더한 번호를 지정한다. 새 분류는 001부터 시작한다.
@@ -210,14 +282,15 @@ API는 이 캐시에 넣지 않는다. 에셋 버전이 바뀌면 이전 캐시�
 
 협동 게임의 좌하단은 교류·채팅·> 순서다. 교류의 기존 이모티콘 기능을 유지하며,
 >를 펼치면 설정·매뉴얼·전체화면 버튼이 오른쪽으로 나타난다. 협동 파티 대기실에서도 좌하단의
-채팅 버튼을 사용할 수 있다. 전략 선택 단계에도 좌하단에 채팅 버튼을 표시하며,
-같은 방의 대기실 → 전략 선택 → 전투에서 기록을 이어서 표시한다. 정보 확인 단계에는
-공간을 확보하기 위해 채팅 버튼을 표시하지 않으며 기록은 계속 유지한다.
+채팅 버튼을 사용할 수 있다. 정보 확인·전략 선택 단계에도 좌하단에 채팅 버튼을 표시하며,
+같은 방의 대기실 → 정보 확인 → 전략 선택 → 전투에서 기록을 이어서 표시한다.
 채팅은 같은 방의 실제 팀원에게만 전달되며 관전자·다른 방·봇은 대상에 포함하지 않는다.
 메시지는 200자까지, 전송 간격은 1초다. 열린 채팅은 최근 50건을 페이지 메모리에 보존하고
 스크롤한다. 기록 영역은 데스크톱에서 화면 높이의 절반, 모바일에서는 사용 가능한 세로 공간으로
-제한한다. 닫으면 그 순간의 기록 표시를 고정하고 10초 뒤 숨긴다. 닫힌 동안 받은 메시지도 기록에는
-추가되어 다시 열었을 때 확인할 수 있다. 방을 떠나거나 페이지를 새로 고치면 기록을 지운다.
+제한한다. 다른 입력 필드나 설정 창을 사용하지 않을 때 Enter로 채팅을 열고 메시지를 전송할 수 있다.
+빈 입력에서 Enter를 다시 누르면 입력창을 닫는다. 닫은 뒤에도 새 메시지를 기록창에 바로 표시하며,
+닫거나 마지막 메시지를 받은 시점부터 5초 뒤 숨긴다. 다시 열면 보존된 기록을 확인할 수 있다.
+방을 떠나거나 페이지를 새로 고치면 기록을 지운다.
 연결이 끊긴 동안 쓴 메시지는 자동 전송하지 않는다. 서버·브라우저 영구 저장소·전투 리플레이에
 채팅 기록을 보관하지 않는다.
 
@@ -227,6 +300,14 @@ API는 이 캐시에 넣지 않는다. 에셋 버전이 바뀌면 이전 캐시�
 제한을 적용한다. 상세 이모티콘 선택은 추후 추가한다.
 
 추가 기능 설계와 작업 기록은 .cache/feature-work/에 작성하며 Git에서 제외한다.
+
+정보 확인 단계의 오퍼레이터 설정과 준비 완료 현황 사이에 재시작 투표를 표시한다.
+최초 요청은 채팅에 초록색으로 알리고, 버튼은 `재시작 n / 현재 사람 수`로 바뀐다.
+찬성 시 초록색 테두리로 표시하며 다시 눌러 취소할 수 있다. 찬성이 0명이 되면 문구는 `재시작 투표`로 돌아간다.
+AI·관전자는 투표와 분모에서 제외한다.
+잠시 연결이 끊긴 사람은 방에 남아 있는 동안 분모에 포함하지만 찬성은 해제된다.
+모든 사람 팀원이 찬성하면 짧은 검은 화면 전환 뒤 금지 정보를 다시 추첨하여 정보 확인을 시작한다.
+방·닉네임·편성·채팅은 유지하며 준비와 투표는 초기화한다. 금지가 없는 난이도는 기존 규칙을 유지한다.
 
 ## 검사와 개발 서버
 
