@@ -1,0 +1,12 @@
+# Before the first certificate, expose only validation and health endpoints.
+server {
+    listen 80;
+    server_name ${TLS_DOMAIN};
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/acme;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+    location = /healthz { proxy_pass http://stronghold:3000; }
+    location / { return 503; }
+}

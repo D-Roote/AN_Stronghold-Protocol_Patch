@@ -1,0 +1,39 @@
+# Combine with stack.nginx.yaml. Configure once with scripts/tls.py.
+services:
+  nginx:
+    entrypoint: ["/bin/sh", "/opt/tls/nginx-acme.sh"]
+    environment:
+      TLS_DOMAIN: "${TLS_DOMAIN:?Run scripts/tls.py configure}"
+    ports:
+      - "${NGINX_BIND_IP:-0.0.0.0}:${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - {type: bind, source: ./nginx-game-acme.conf, target: /etc/nginx/nginx.conf, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: ./nginx-game-proxy.inc, target: /etc/nginx/game-proxy.inc, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: ./nginx-acme.sh, target: /opt/tls/nginx-acme.sh, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: ./nginx-game-acme-http.conf.template, target: /opt/tls/http.conf.template, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: ./nginx-game-acme-https.conf.template, target: /opt/tls/https.conf.template, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: "${TLS_STATE_DIR:?Run scripts/tls.py configure}/certs", target: /etc/nginx/tls, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: "${TLS_STATE_DIR}/webroot", target: /var/www/acme, read_only: true, bind: {create_host_path: false}}
+
+  acme:
+    image: "${TLS_ACME_IMAGE:-ghcr.io/acmesh-official/acme.sh:3.1.6}"
+    user: "${TLS_UID:?Run scripts/tls.py configure}:${TLS_GID:?Run scripts/tls.py configure}"
+    command: ["daemon"]
+    restart: unless-stopped
+    init: true
+    environment:
+      AUTO_UPGRADE: "0"
+      TLS_DOMAIN: "${TLS_DOMAIN}"
+      TLS_EMAIL: "${TLS_EMAIL:?Run scripts/tls.py configure}"
+      TLS_CA: "${TLS_CA:-letsencrypt}"
+    volumes:
+      - {type: bind, source: "${TLS_STATE_DIR}/acme", target: /acme.sh, bind: {create_host_path: false}}
+      - {type: bind, source: "${TLS_STATE_DIR}/webroot", target: /var/www/acme, bind: {create_host_path: false}}
+      - {type: bind, source: "${TLS_STATE_DIR}/certs", target: /certs, bind: {create_host_path: false}}
+      - {type: bind, source: ./acme-issue.sh, target: /opt/tls/acme-issue.sh, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: ./acme-deploy.sh, target: /opt/tls/acme-deploy.sh, read_only: true, bind: {create_host_path: false}}
+    mem_limit: 128m
+    cpus: 0.25
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}

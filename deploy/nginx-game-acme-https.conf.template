@@ -1,0 +1,23 @@
+server {
+    listen 80;
+    server_name ${TLS_DOMAIN};
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/acme;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+    location = /healthz { proxy_pass http://stronghold:3000; }
+    location / { return 308 https://${TLS_DOMAIN}$request_uri; }
+}
+
+server {
+    listen 443 ssl;
+    server_name ${TLS_DOMAIN};
+    ssl_certificate /etc/nginx/tls/fullchain.pem;
+    ssl_certificate_key /etc/nginx/tls/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:GAME_TLS:1m;
+    ssl_session_timeout 10m;
+    client_max_body_size 1m;
+    include /etc/nginx/game-proxy.inc;
+}

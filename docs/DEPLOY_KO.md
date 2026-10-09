@@ -107,7 +107,8 @@ python3 ../scripts/project.py verify --gateway nginx
 nginx는 Docker 내부의 stronghold:3000으로 HTTP와 WebSocket을 전달한다.
 [nginx WebSocket 문서](https://nginx.org/en/docs/http/websocket.html)에 따라 Upgrade 헤더를 전달한다.
 service/.env의 NGINX_BIND_IP(기본 0.0.0.0), NGINX_HTTP_PORT(기본 80)로 공개 주소와 포트를 지정한다.
-nginx.conf는 기본 HTTP 구성이다. 외부 접속의 HTTPS가 필요하면 도메인·인증서와 TLS 설정을 추가한다.
+nginx.conf는 기본 HTTP 구성이다. 외부 접속의 HTTPS는 아래의 `scripts/tls.py`와
+`stack.nginx-acme.yaml`로 인증서 발급 및 자동 갱신까지 구성할 수 있다.
 브라우저 에셋 사전 다운로드 캐시는 HTTPS 또는 localhost에서 사용할 수 있다.
 서버 이전 시 SSH·방화벽·OCI 네트워크의 포트 공개는 해당 서버에서 설정한다.
 
@@ -121,6 +122,101 @@ nginx는 워커 1개, 메모리 128MB와 CPU 0.25로 제한한다. 모든 구성
 해당 서버 아키텍처의 이미지를 빌드한다. 생성 소스와 service 에셋 경로는 새 환경에서 자동 구성된다.
 기존 PC의 절대 경로를 담은 생성 Compose 파일을 복사하는 대신 새 서버의 deploy 템플릿을 사용한다.
 현재 작업은 이전용 구성을 준비하는 범위이며 실제 Oracle VM 이전은 수행하지 않았다.
+
+## Let's Encrypt HTTPS 자동 구성
+
+Cloudflare를 DNS 전용으로 사용하면 nginx가 HTTPS/WSS를 직접 처리한다.
+인증서 발급에는 Alpine 기반 공식 acme.sh 3.1.6 이미지를 사용한다. AMD64·ARM64를 지원하며
+컨테이너 메모리는 128MB, CPU는 0.25로 제한한다. Let's Encrypt를 명시적으로 선택한다.
+호스트에 ACME 클라이언트나 cron을 설치하지 않는다.
+
+먼저 게임/에셋 도메인의 A 레코드를 해당 서버 공인 IP에 연결한다. AAAA 레코드가 있으면
+IPv6 경로도 인증 요청을 처리해야 하므로 사용하지 않는 이전 AAAA는 제거한다.
+OCI 네트워크 규칙과 서버 방화벽에서 TCP **80·443**을 허용한다. 홈서버는 공유기 포트포워딩도
+필요하다. [HTTP-01 인증은 외부 80 포트로 접속](https://letsencrypt.org/docs/challenge-types/#http-01-challenge)하므로
+갱신 중에도 계속 열어 둔다. HTTPS는 외부 443으로 연결한다. 기존 Tunnel을 이용한 연결은 종료한다.
+
+### 게임 서버
+
+~~~bash
+python3 scripts/project.py setup
+python3 scripts/tls.py configure --domain game.example.com --email admin@example.com
+python3 scripts/tls.py issue
+cd service
+docker compose -f stack.nginx.yaml -f stack.nginx-acme.yaml ps
+~~~
+
+도메인·이메일은 실제 값으로 바꾼다. `configure`는 설정만 작성하며 인증서 발급이나 컨테이너 시작을
+하지 않는다. 기존 `.env`의 비밀값, 소스·에셋 경로를 보존한다. `issue`는 nginx의 인증용 HTTP를 시작하고
+인증서를 발급·설치한 다음 HTTPS를 활성화하고 갱신 컨테이너를 시작한다. 처음 발급하기 전에는
+인증 경로와 헬스 체크만 HTTP로 제공하며, 발급 후 일반 HTTP 접속은 HTTPS로 308 리다이렉트한다.
+인증서 저장 디렉터리가 아닌 개별 PEM 파일을 bind mount하지 않으므로 갱신된 파일도 바로 읽을 수 있다.
+
+운영은 반드시 두 파일을 함께 사용한다.
+
+~~~bash
+cd service
+docker compose -f stack.nginx.yaml -f stack.nginx-acme.yaml up -d --wait
+docker compose -f stack.nginx.yaml -f stack.nginx-acme.yaml logs --tail=50 nginx acme
+docker compose -f stack.nginx.yaml -f stack.nginx-acme.yaml down
+~~~
+
+`setup`을 다시 실행해도 TLS 설정과 인증서는 유지된다. 이후 위의 `up`으로 새 앱 이미지를 적용한다.
+`project.py up/down/status/verify --gateway nginx`도 `.env`의 TLS 구성을 인식해 두 파일을 함께 사용한다.
+인증서는 이미 발급되어 있으면 재사용하므로 컨테이너 재생성 때 발급을 반복하지 않는다.
+
+### 분리한 홈 에셋 서버
+
+`~/SP_Assets/.env`에 `ASSET_BUNDLE_DIR=./assets` 등 완전한 번들 경로가 준비되어 있으면
+작업 저장소의 스크립트로 구성 파일을 배포한다. 기존 에셋 서버를 종료한 다음 실행한다.
+
+~~~bash
+cd ~/Stronghold-Protocol
+python3 scripts/tls.py --directory ~/SP_Assets configure \
+  --target assets --domain assets.example.com --email admin@example.com
+python3 scripts/tls.py --directory ~/SP_Assets issue
+cd ~/SP_Assets
+docker compose -f stack.assets-direct.yaml -f stack.assets-acme.yaml ps
+~~~
+
+이 구성은 에셋 서버의 HTTP 포트를 **8081에서 80으로**, HTTPS 포트를 443으로 설정한다.
+공유기에서 외부 80·443을 해당 포트로 전달한다. 별도 프록시 때문에 내부 포트를 바꿔야 한다면
+`configure` 후 `.env`의 `ASSET_HTTP_PORT`/`ASSET_HTTPS_PORT`를 바꾸되 외부 포트는 80·443을 유지한다.
+`ASSET_PUBLIC_PATH`는 그대로 보존한다. 인증 경로 `/.well-known/acme-challenge/`에는 이 prefix를 붙이지 않는다.
+`stack.assets-https.yaml`은 수동 인증서용이므로 자동 구성과 함께 병합하지 않는다.
+이 TLS 구성은 에셋 우선 서버 선택·게임 서버 fallback 기능을 추가하지 않는다.
+
+### 갱신과 확인
+
+공식 [acme.sh Docker daemon](https://github.com/acmesh-official/acme.sh/wiki/Run-acme.sh-in-docker)이
+주기적으로 갱신 필요 여부를 확인한다. 고정 인증서 수명을 가정하지 않고 클라이언트의 갱신 판단을 따른다.
+완료 후 인증서·키의 일치, 도메인과 만료일을 검증하고 nginx에 공유하는 파일을 교체한다.
+nginx는 5초 안에 변경을 감지해 설정 검증 후 재로드한다. 잘못된 인증서·키는 활성 인증서를 덮어쓰지 않는다.
+Docker socket은 공유하지 않으며 nginx에는 인증서 디렉터리를 읽기 전용으로 마운트한다.
+[nginx 재로드](https://nginx.org/en/docs/control.html#reconfiguration)는 기존 연결을 유지하므로 게임 앱을 재시작할 필요가 없다.
+
+~~~bash
+# 필요할 때만 갱신 여부를 즉시 확인; 강제 발급하지 않음
+python3 scripts/tls.py renew
+# 분리 에셋 서버
+python3 scripts/tls.py --directory ~/SP_Assets renew
+curl -f https://game.example.com/healthz
+curl -f https://assets.example.com/healthz/assets
+~~~
+
+비공개 `.env`에는 `TLS_DOMAIN`, `TLS_EMAIL`, `TLS_CA`, `TLS_STATE_DIR`, `TLS_UID/GID`가 기록된다.
+계정과 키는 운영 디렉터리의 `tls/production/<도메인>/` 아래에 보관하고 Git에 포함하지 않는다.
+도메인을 바꿔 `configure`하면 별도 상태를 사용하므로 이전 도메인의 인증서를 재사용하지 않는다.
+다른 런타임 디렉터리로 옮기면 그 경로에서 `configure`를 다시 실행한다. 이미지 변경은
+`.env`의 `TLS_ACME_IMAGE`로 지정하고 Compose `pull acme` 후 `up -d`로 적용할 수 있다.
+
+테스트 발급은 `configure`에 `--staging`을 추가한다. 이 인증서는 브라우저가 신뢰하지 않으며
+`tls/staging/`의 별도 상태를 사용한다. 실제 서비스로 전환할 때 같은 `configure`를 `--staging` 없이
+실행한 다음 `issue`를 실행한다. 반복적인 production 강제 발급은 하지 않는다.
+
+발급 실패 시 DNS, 80 포트와 HTTP 인증 경로를 먼저 확인한다. 상세 ACME 로그는
+`TLS_STATE_DIR/acme/acme.log`와 Compose `logs acme`에서 확인한다. 오류를 해결한 뒤 `issue`를 다시 실행한다.
+운영 인증서가 있는 경우 발급 시도가 실패해도 기존 HTTPS를 유지하며 자동 갱신 컨테이너를 다시 시작한다.
 
 ## 직접 nginx 에셋 서버
 

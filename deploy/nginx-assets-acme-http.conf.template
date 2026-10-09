@@ -1,0 +1,18 @@
+server {
+    listen 80;
+    server_name ${TLS_DOMAIN};
+    root /srv/stronghold-assets;
+    # nginx-assets.conf's cache map references this variable even during bootstrap.
+    set $asset_success_cache "no-store";
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/acme;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+    location = ${ASSET_PUBLIC_PATH}/healthz/assets {
+        rewrite ^${ASSET_PUBLIC_PATH}(/.*)$ $1 break;
+        default_type application/json;
+        add_header Cache-Control "no-store" always;
+    }
+    location / { return 503; }
+}

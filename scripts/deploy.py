@@ -29,13 +29,22 @@ _ENV_KEY = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z_0-9]*)\s*=")
 _MANAGED = {"STRONGHOLD_SOURCE_DIR", "STRONGHOLD_IMAGE", "VOICE_LANG",
             "FETCH_ASSETS", "DEV_PORT", "LOCAL_ASSETS_DIR", "LOCAL_ASSETS_MANIFEST",
             "ASSET_BUNDLE_DIR", "ASSET_PUBLIC_PATH", "ASSET_BIND_IP", "ASSET_HTTP_PORT",
-            "ASSET_HTTPS_PORT", "ASSET_TLS_CERT", "ASSET_TLS_KEY"}
+            "ASSET_HTTPS_PORT", "ASSET_TLS_CERT", "ASSET_TLS_KEY",
+            "TLS_TARGET", "TLS_DOMAIN", "TLS_EMAIL", "TLS_CA", "TLS_STATE_DIR",
+            "TLS_UID", "TLS_GID", "TLS_ACME_IMAGE", "NGINX_HTTPS_PORT",
+            "NGINX_HTTP_PORT", "NGINX_BIND_IP"}
 _SNAPSHOT_NAME = re.compile(r"\d{8}T\d{6}\.\d{6}Z")
 COMPOSE_FILES = {"tunnel": "stack.cf-tunnel.yaml", "nginx": "stack.nginx.yaml", "dev": "stack.dev.yaml"}
 ASSET_COMPOSE_FILES = ("stack.assets-direct.yaml", "stack.assets-https.yaml")
+TLS_SHARED_FILES = ("nginx-acme.sh", "acme-issue.sh", "acme-deploy.sh")
+TLS_GAME_FILES = ("stack.nginx-acme.yaml", "nginx-game-acme.conf", "nginx-game-proxy.inc",
+                  "nginx-game-acme-http.conf.template", "nginx-game-acme-https.conf.template")
+TLS_ASSET_FILES = ("stack.assets-acme.yaml", "nginx-assets-acme-http.conf.template",
+                  "nginx-assets-acme-https.conf.template")
+TLS_FILES = (*TLS_SHARED_FILES, *TLS_GAME_FILES, *TLS_ASSET_FILES)
 GENERATED_FILES = (*COMPOSE_FILES.values(), "nginx.conf", *ASSET_COMPOSE_FILES,
                    "nginx-assets.conf", "nginx-assets-http.conf.template",
-                   "nginx-assets-https.conf.template", "nginx-assets-routes.inc.template")
+                   "nginx-assets-https.conf.template", "nginx-assets-routes.inc.template", *TLS_FILES)
 LEGACY_COMPOSE_HASHES = {
     "compose.yaml": "69d8683cab127f33e11ddb7c599b41141c3ad1a04d02de7e939244c0b47295f7",
     "compose.dev.yaml": "bbcbc2ae3bbf891714aba176edfdd8b25e52da18edebbb9670f1845457d19de7",
@@ -354,7 +363,12 @@ def _compose(service, *, dev=False, gateway="tunnel", env_file=None, compose_fil
     if gateway not in {"tunnel", "nginx"} or (dev and gateway != "tunnel"):
         raise DeploymentError("Choose tunnel or nginx; --dev uses its own local stack")
     config = compose_file or service / COMPOSE_FILES["dev" if dev else gateway]
-    return ["docker", "compose", "--env-file", env_file or service / ".env", "-f", config]
+    args = ["docker", "compose", "--env-file", env_file or service / ".env", "-f", config]
+    private = Path(env_file or service / ".env")
+    if gateway == "nginx" and not compose_file and private.is_file():
+        if _runtime_setting(private.read_text(encoding="utf-8"), "TLS_TARGET") == "game":
+            args.extend(["-f", service / "stack.nginx-acme.yaml"])
+    return args
 
 
 def configure(root, pin, source, *, image=None):
@@ -752,7 +766,8 @@ def export_asset_server(root, pin, source=None, *, image=None, output=None):
                     shutil.rmtree(stage)
                 if retired is not None and retired.exists():
                     shutil.rmtree(retired)
-    for filename in ASSET_COMPOSE_FILES + tuple(name for name in GENERATED_FILES if name.startswith("nginx-assets")):
+    for filename in dict.fromkeys((*ASSET_COMPOSE_FILES, *TLS_SHARED_FILES, *TLS_ASSET_FILES,
+                                  *(name for name in GENERATED_FILES if name.startswith("nginx-assets")))):
         _atomic(service / filename, (templates / filename).read_text(encoding="utf-8"))
     _atomic(env_file, _rewrite_env(original, {"ASSET_BUNDLE_DIR": target}), private=True)
     return {"bundle_directory": str(target), "bundle": metadata["bundle"], "reused": reused,

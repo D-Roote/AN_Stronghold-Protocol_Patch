@@ -19,6 +19,7 @@
 | deploy/ | 운영·개발 설정 템플릿 및 검사 이미지 |
 | [scripts/project.py](scripts/project.py) | 원본 준비, 업데이트, 패치 추출과 구성 CLI |
 | [scripts/deploy.py](scripts/deploy.py) | 에셋 추출, 최종 이미지 빌드와 Compose 구성 |
+| [scripts/tls.py](scripts/tls.py) | nginx HTTPS와 Let's Encrypt 인증서 발급·자동 갱신 |
 | tests/ | 자체 구성 스크립트의 테스트 |
 
 기본 한국어, 에셋 사전 다운로드, 팀 텍스트 채팅과 접이식 메뉴를 추가합니다.
@@ -49,6 +50,7 @@ docker compose -f stack.cf-tunnel.yaml ps
 | --- | --- |
 | `service/stack.cf-tunnel.yaml` | 기존 Cloudflare Tunnel, 앱은 localhost:3000 |
 | `service/stack.nginx.yaml` | nginx 역방향 프록시, 기본 HTTP 80 |
+| `service/stack.nginx-acme.yaml` | nginx 구성에 추가하는 HTTPS·인증서 자동 갱신 |
 | `service/stack.dev.yaml` | 별도 개발 서버, localhost:3100 |
 
 홈서버에 게임 없이 nginx 에셋 서버만 구성할 수 있습니다. 이미지의 에셋·폰트·KR/JP 음성과
@@ -62,11 +64,31 @@ docker compose -f stack.assets-direct.yaml up -d
 
 기본 HTTP 포트는 8081이고 헬스 체크는 `/healthz/assets`입니다. 직접 HTTPS로 제공할 때는
 인증서 경로를 지정하고 `stack.assets-https.yaml`을 함께 사용합니다.
+자동 발급·갱신은 `stack.assets-acme.yaml`로 구성합니다.
 준비된 이미지의 에셋만 다시 추출할 때는 `python3 scripts/project.py assets-export`를 사용합니다.
 전체 절차와 설정은 [에셋 서버 안내](docs/DEPLOY_KO.md#직접-nginx-에셋-서버)에 있습니다.
 
 nginx를 선택하면 위 명령의 파일명을 `stack.nginx.yaml`로 바꿉니다.
 게이트웨이를 전환할 때는 기존 구성으로 `down`한 뒤 새 구성으로 `up -d`합니다.
+
+Cloudflare를 DNS 전용으로 사용해 서버에 직접 연결할 때는 도메인을 서버 IP로 연결하고
+외부 **TCP 80·443**을 허용한 뒤 아래를 실행합니다. 도메인과 이메일은 실제 값으로 바꿉니다.
+
+~~~bash
+# setup이 끝난 게임 서버에서 실행; configure는 파일만 준비
+python3 scripts/tls.py configure --domain game.example.com --email admin@example.com
+# 인증서 발급·HTTPS 전환·자동 갱신 컨테이너 시작
+python3 scripts/tls.py issue
+
+# 이후 HTTPS 서비스 관리에는 두 파일을 함께 선택
+cd service
+docker compose -f stack.nginx.yaml -f stack.nginx-acme.yaml up -d --wait
+~~~
+
+Alpine 기반 acme.sh **3.1.6** 이미지로 Let's Encrypt 인증서를 관리하며 ARM64도 지원합니다.
+인증서가 갱신되면 nginx가 자동으로 재로드하고 기존 WebSocket 연결을 유지합니다.
+계정·개인 키는 운영 디렉터리의 `tls/` 아래에 보관합니다. 호스트에 Certbot이나 cron을 설치할 필요가 없습니다.
+`~/SP_Assets`에도 별도로 적용할 수 있습니다. [HTTPS 자동 구성 안내](docs/DEPLOY_KO.md#lets-encrypt-https-자동-구성)를 참고하세요.
 
 별도로 prepare를 먼저 실행할 필요가 없습니다. Cloudflare Tunnel을 사용하면
 시작 전에 service/.env에 Tunnel token을 입력합니다. nginx 구성에는 token이 필요하지 않습니다.
