@@ -466,7 +466,7 @@ def check(root, source, pin, *, full=False):
               "-v", f"{source}:{mount}", "-w", mount, validation]
     commands = [["npm", "ci", "--include=dev", "--no-audit", "--no-fund"],
                 ["node", "tools/i18n.mjs", "check", "ko", "--strict"],
-                ["node", "--test", "test/voices.test.js"],
+                ["node", "--test", "test/voices.test.js", "test/voice-packs.test.js", "test/ui/voice-language.test.js"],
                 ["npm", "run", "lint"], ["npm", "run", "check:imports"],
                 ["npm", "run", "typecheck"]]
     if full:

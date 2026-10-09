@@ -1,0 +1,78 @@
+diff --git a/public/i18n/en.json b/public/i18n/en.json
+index 6b764baa869d277ce0abfd639c9b87eb33810b28..c84833e2c2f86cb347910d448031c6cdf5ed6be6 100644
+--- a/public/i18n/en.json
++++ b/public/i18n/en.json
+@@ -1107,6 +1107,8 @@
+   "叙拉古": "Siracusa",
+   "卡西米尔": "Kazimierz",
+   "{name}博士选择了{faction}阵营": "{name} chose the {faction} faction.",
++  "干员配音语言": "Operator voice language",
++  "所选语言没有该干员的语音时保持静音。": "Operators without voices in the selected language remain silent.",
+   "表情与阵营": "Emotes and factions",
+   "选择阵营": "Choose a faction",
+   "表情功能稍后提供": "Emotes will be added later",
+diff --git a/public/js/audio.js b/public/js/audio.js
+index f7a8784ad424bd106bdfeaca7501bf4520459295..eaab8af778a857156a494c33fb317fa747bdee45 100644
+--- a/public/js/audio.js
++++ b/public/js/audio.js
+@@ -46,6 +46,7 @@
+ // `bgmKeyFor(route, pub)` picks the track for the current screen/phase (main.js calls `audio.install()`,
+ // which follows the store).
+ 
++import { DEFAULT_VOICE_LANGUAGE, normalizeVoiceLanguage, voiceBank } from '../../shared/voiceLanguages.js';
+ import { PHASE } from '../../shared/constants.js';
+ import { mediaUrl } from './media.js';
+ 
+@@ -449,6 +450,7 @@ export class AudioManager {
+     this.bgmGain = null;
+     this.sfxGain = null;
+     this.voiceGain = null;
++    this.voiceLanguage = DEFAULT_VOICE_LANGUAGE;
+     this.volumes = { bgm: 0.6, sfx: 0.8, voice: 0.8, muted: false };
+     this.buffers = new Map(); // url → Promise<AudioBuffer|null> (insertion order = LRU)
+     this.bufBytes = new Map(); // url → decoded PCM bytes (the byte budget of the LRU, see _buffer)
+@@ -836,7 +838,7 @@ export class AudioManager {
+     try {
+       if (!this.ctx || !this.voiceGain || this.volumes.muted || this.volumes.voice <= 0) return false;
+       if (typeof charId !== 'string' || typeof slot !== 'string') return false;
+-      const line = this.getManifest()?.audio?.voice?.[charId]?.[slot];
++      const line = voiceBank(this.getManifest(), this.voiceLanguage)?.[charId]?.[slot];
+       const url = Array.isArray(line) ? line[Math.floor(Math.random() * line.length)] : line;
+       if (typeof url !== 'string' || !url) return false;
+       const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+@@ -850,6 +852,15 @@ export class AudioManager {
+     } catch (err) { this._warn('voice', err); return false; }
+   }
+ 
++  /** Switch dubs immediately; cancel an old line even if it is still decoding. */
++  setVoiceLanguage(value) {
++    const lang = normalizeVoiceLanguage(value);
++    if (lang === this.voiceLanguage) return;
++    this._stopVoice();
++    this.voiceGate.reset();
++    this.voiceLanguage = lang;
++  }
++
+   /** Fetch/decode and start one voice line through the voice channel. */
+   _playVoice(url, token, volume) {
+     // `token` is the line's own `voiceToken`. Every deferred step below — the decode, a failed fetch, `onended` and the
+diff --git a/public/js/ui/settings.js b/public/js/ui/settings.js
+index 63473e8c9b4cc8938a8e2d6544201b5a01861f60..b847a7f672dc821057b94d1d39d3172557e3d244 100644
+--- a/public/js/ui/settings.js
++++ b/public/js/ui/settings.js
+@@ -10,6 +10,7 @@ import { html, Modal, Button, Icon, MicroLabel } from './components.js';
+ import { createStore, useStore, loadPref, savePref } from '../store.js';
+ import { sanitizeSettings, HOTKEY_ACTIONS, DEFAULT_HOTKEYS, hotkeyLabel, rebindHotkey, isDefaultHotkeys, captureHotkey } from './gameLogic.js';
+ import { audio } from '../audio.js';
++import { VoiceLanguageSetting } from './voiceLanguage.js';
+ import { openGuide } from './guide.js';
+ import { openAssetPrefetchControls } from '../assetPrefetch.js';
+ import { detectFeatures } from './device.js';
+@@ -169,6 +170,7 @@ export function SettingsModal({ open, onClose }) {
+       </div>
+       <${Slider} label=${t('背景音乐')} micro="BGM" icon="play" value=${s.bgm} onInput=${(v) => updateSettings({ bgm: v })} />
+       <${Slider} label=${t('干员语音')} micro="VOICE" icon="mic" value=${s.voice} onInput=${(v) => updateSettings({ voice: v })} />
++      <${VoiceLanguageSetting} />
+       <${Slider} label=${t('音效')} micro="SFX" icon="signal" value=${s.sfx}
+         onInput=${(v) => { updateSettings({ sfx: v }); if (!tested) { setTested(true); setTimeout(() => setTested(false), 400); audio.sfx('click'); } }} />
+       <${Toggle} label=${t('静音')} micro="MUTE" value=${s.muted} onChange=${(v) => updateSettings({ muted: v })} />

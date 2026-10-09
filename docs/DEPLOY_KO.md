@@ -37,7 +37,7 @@ python3 scripts/project.py setup
 ~~~
 
 setup 하나로 원본 다운로드와 pin 검증, 한국어 패치 적용, 로컬 에셋 추출,
-최종 KR 이미지 빌드와 service/Compose 설정 생성을 완료한다. prepare를 먼저 실행할 필요가 없다.
+최종 KR/JP 음성 이미지 빌드와 service/Compose 설정 생성을 완료한다. prepare를 먼저 실행할 필요가 없다.
 반복 실행하면 패치 변경을 감지해 소스를 다시 준비하며, 기본적으로 서버는 시작하지 않는다.
 
 기존 service/.env의 Tunnel token, 알 수 없는 설정과 주석은 보존한다. 새 환경에서는
@@ -54,6 +54,12 @@ service/의 stack.*.yaml과 nginx.conf는 생성 파일이다. 템플릿은 depl
 운영 프로젝트 이름 stronghold, 127.0.0.1:3000 포트와 기존 Named Tunnel 연결을 유지한다.
 로컬 접속은 http://localhost:3000/이다. 최초 접속은 한국어로 시작하며 URL의 ?lang= 값이나
 기존 브라우저에 저장한 언어 선택이 있으면 그 값을 우선한다.
+
+설정의 **오퍼레이터 음성 언어**에서 한국어·일본어를 선택한다. 한국어가 기본이며 선택값은
+브라우저에 저장한다. UI 언어와 별개로 적용하며, 변경하면 재생·디코딩 중인 이전 음성을
+취소하고 다음 음성부터 선택한 언어를 사용한다. 해당 언어의 음성이 없는 오퍼레이터는 무음이다.
+setup과 Compose 빌드는 두 음성팩을 함께 포함하며 verify는 KR·JP의 경로와 파일을 모두 검사한다.
+VOICE_LANG=kr은 원본 호환용 기본 음성 은행을 지정하는 빌드값이며 브라우저 음성 선택과 별개다.
 
 준비 후에는 service/에서 Docker Compose로 관리한다.
 
@@ -154,7 +160,7 @@ prepare는 원본 값이 base 또는 이미 교정된 value와 같을 때만 적
 ~~~bash
 python3 scripts/project.py prepare
 # .build/Stronghold-Protocol 안의 필요한 소스 파일 편집
-python3 scripts/project.py capture --path server/index.js --name 03-004-Feat-my-change.patch
+python3 scripts/project.py capture --path server/index.js --name 03-005-Feat-my-change.patch
 python3 scripts/project.py prepare
 ~~~
 
@@ -167,11 +173,13 @@ python3 scripts/project.py prepare
 | 순서 | 패치 | 내용 |
 | --- | --- | --- |
 | 01-001 | Build-korean-voice | KR 음성 빌드 |
+| 01-002 | Build-japanese-voice-pack | KR/JP 음성팩 동시 준비와 검사 |
 | 02-001 | UI-korean-first-visit | 최초 한국어와 언어 검사 |
 | 02-002 | UI-mobile-orientation-ko | 모바일 회전 안내 |
 | 03-001 | Feat-asset-prefetch | 에셋 사전 다운로드 |
 | 03-002 | Feat-team-chat | 기본 채팅과 접이식 메뉴 |
 | 03-003 | Feat-session-chat-factions | 세션 채팅·진영·전략 선택 UI |
+| 03-004 | Feat-voice-language | 설정의 음성 언어 선택과 재생 전환 |
 | 04-001 | Resource-ai-teammate-limit | 방별 추가 AI 제한 |
 
 capture에는 해당 분류의 가장 큰 번호에 1을 더한 번호를 지정한다. 새 분류는 001부터 시작한다.
@@ -186,8 +194,8 @@ capture는 지정한 파일만 보존하며, 관계없는 수정이 남아 있�
 
 ## 사용자 에셋 다운로드와 팀 채팅
 
-처음 접속하면 에셋 사전 다운로드 동의를 묻는다. 현재 전체 대상은 약 567MB이며 이미지·모델·
-KR 음성·로컬 폰트를 브라우저에 저장한다. 동의하면 게임을 이용하는 동안 두 파일씩 백그라운드로
+처음 접속하면 에셋 사전 다운로드 동의를 묻는다. 이미지·모델·KR/JP 음성·로컬 폰트를
+브라우저에 저장하며 설정에 전체 예상 용량을 표시한다. 동의하면 게임을 이용하는 동안 두 파일씩 백그라운드로
 다운로드한다. 선택은 해당 브라우저에 저장하며, 거절해도 필요할 때 에셋을 불러와 플레이할 수 있다.
 
 최초 동의 팝업 이후에는 설정의 에셋 다운로드에서 진행률 확인, 일시정지·재개·
@@ -242,7 +250,7 @@ docker compose -f stack.dev.yaml down
 ~~~
 
 개발 서버는 별도 프로젝트와 127.0.0.1:3100 포트를 사용한다.
-setup에서 준비한 소스와 KR 이미지를 사용하며, 별도의 prepare나 configure는 필요하지 않다.
+setup에서 준비한 소스와 KR/JP 음성 이미지를 사용하며, 별도의 prepare나 configure는 필요하지 않다.
 소스 준비·Git push·검사만으로 실행 중 운영 컨테이너의 프로그램이 교체되지는 않는다.
 
 ## 원본 업데이트와 에셋

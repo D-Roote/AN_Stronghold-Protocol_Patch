@@ -506,12 +506,14 @@ entries:data.count,references:urls.length,missing}));"""
     base = ["docker", "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}", "--network", "host",
             "--volumes-from", f"{ids[0]}:ro", "--mount", f"type=bind,source={source / 'tools'},target=/app/tools,readonly",
             "--workdir", "/app", image, "node"]
-    voices = _run([*base, "tools/check-voices.mjs", "--lang=kr"]).strip()
+    voice_packs = {lang: _run([*base, "tools/check-voices.mjs", f"--lang={lang}"]).strip()
+                   for lang in ("kr", "jp")}
     _run([*base, "tools/doctor.mjs", "--port", "3100" if dev else "3000"])
     health = _health(3100 if dev else 3000, attempts=1, expected_version=pin["version"] if pin else None)
     if pin and str(health.get("app", "")).removeprefix("v") != str(pin["version"]).removeprefix("v"):
         raise DeploymentError("Running service version differs from the pinned source version")
-    result = {"healthy": True, "version": health.get("app"), "voices": voices, "doctor": "passed",
+    result = {"healthy": True, "version": health.get("app"), "voices": voice_packs["kr"],
+              "voice_packs": voice_packs, "doctor": "passed",
               "assets": asset_validation, "korean_pack": language_validation}
     if gateway == "nginx":
         raw = _run([*_compose(service, gateway=gateway), "exec", "-T", "nginx",

@@ -261,18 +261,20 @@ class DeploymentTests(unittest.TestCase):
 
     def test_verify_checks_nginx_proxy_in_addition_to_the_app(self):
         health = {"ok": True, "app": "0.2.1"}
-        with patch.object(deploy, "_run", side_effect=["container-id", "image-id", "KR voices", "", json.dumps(health)]) as run, \
+        with patch.object(deploy, "_run", side_effect=["container-id", "image-id", "KR voices", "JP voices", "", json.dumps(health)]) as run, \
                 patch.object(deploy, "_korean_pack", return_value={"lang": "ko"}), \
                 patch.object(deploy, "_health", return_value=health):
             result = deploy.verify(self.root, source=self.source, gateway="nginx")
         self.assertEqual(result["gateway"], {"name": "nginx", "healthy": True})
+        self.assertEqual(result["voice_packs"], {"kr": "KR voices", "jp": "JP voices"})
+        self.assertTrue(any(call.args[0][-1] == "--lang=jp" for call in run.call_args_list))
         self.assertEqual(run.call_args.args[0], [*deploy._compose(self.service, gateway="nginx"), "exec", "-T", "nginx",
                                                "wget", "-q", "-O", "-", "http://127.0.0.1/healthz"])
 
     def test_verify_rejects_invalid_or_mismatched_nginx_health(self):
         for response in ("<html>error</html>", "[]", '{"ok":false,"app":"0.2.1"}', '{"ok":true,"app":"0.1.3"}'):
             with self.subTest(response=response), \
-                    patch.object(deploy, "_run", side_effect=["container-id", "image-id", "KR voices", "", response]), \
+                    patch.object(deploy, "_run", side_effect=["container-id", "image-id", "KR voices", "JP voices", "", response]), \
                     patch.object(deploy, "_korean_pack", return_value={"lang": "ko"}), \
                     patch.object(deploy, "_health", return_value={"ok": True, "app": "0.2.1"}):
                 with self.assertRaises(deploy.DeploymentError):

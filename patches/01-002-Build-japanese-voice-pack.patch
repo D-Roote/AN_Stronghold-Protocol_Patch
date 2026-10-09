@@ -1,0 +1,25 @@
+diff --git a/Dockerfile b/Dockerfile
+index 0395872bfad3da26d4ab9c45485ae04b010cf0f1..27ba2d48fe30569d9100e9a08f607be79d560951 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -5,7 +5,7 @@
+ # only (NOTICE.md), and never part of the repository. Two ways to get it into a container:
+ #   A) download it while building (~250 MB, needs internet during the build):
+ #        docker build -t stronghold-protocol --build-arg FETCH_ASSETS=1 .
+-#      Choose a dub with --build-arg VOICE_LANG=kr (cn, jp, en or kr; default cn).
++#      VOICE_LANG selects the primary bank; Korean and Japanese are both included for the settings selector.
+ #   B) build without it and mount the host's copy (prepared with `node tools/setup.mjs` on the host):
+ #        docker build -t stronghold-protocol .
+ #        docker run -d --name stronghold -p 3000:3000 --restart unless-stopped \
+@@ -41,7 +41,10 @@ RUN node tools/vendor.mjs \
+       set --; \
+       if [ "$VOICE_LANG" != "cn" ]; then set -- --allow-shrink; fi; \
+       node tools/fetch-assets.mjs "--voice-lang=$VOICE_LANG" "$@" || echo "WARNING: art download incomplete; the image falls back to placeholder art"; \
+-      if [ "$VOICE_LANG" != "cn" ]; then node tools/check-voices.mjs "--lang=$VOICE_LANG"; fi; \
++      if [ "$VOICE_LANG" != "cn" ]; then node tools/check-voices.mjs "--lang=$VOICE_LANG" || exit 1; fi; \
++      node tools/fetch-voice-packs.mjs "--base-lang=$VOICE_LANG" --languages=kr,jp \
++        && node tools/check-voices.mjs --lang=kr \
++        && node tools/check-voices.mjs --lang=jp; \
+     fi \
+  && rm -rf .cache
+ 

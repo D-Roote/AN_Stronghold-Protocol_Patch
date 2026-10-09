@@ -27,3 +27,23 @@ test('a stale or mixed CN manifest cannot pass a KR build check', () => {
   manifest.audio.voice.char_102_texas.select = ['/assets/audio/voice/kr/../../secret'];
   assert.match(checkVoices(manifest, 'kr').errors.join('\n'), /unexpected voice URL/);
 });
+
+test('KR and JP checks inspect their own bank, even when the primary bank is KR', () => {
+  const root = mkdtempSync(join(tmpdir(), 'sp-voices-'));
+  try {
+    const banks = {};
+    for (const lang of ['kr', 'jp']) {
+      const dir = join(root, `public/assets/audio/voice/${lang}/char_102_texas`);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'cn_023.mp3'), lang);
+      banks[lang] = { char_102_texas: { select: `/assets/audio/voice/${lang}/char_102_texas/cn_023.mp3` } };
+    }
+    const manifest = { audio: { voice: banks.kr, voicePacks: banks } };
+    assert.deepEqual(checkVoices(manifest, 'jp', root), { lang: 'jp', chars: 1, files: 1, errors: [] });
+    banks.jp.char_102_texas.select = banks.kr.char_102_texas.select;
+    assert.match(checkVoices(manifest, 'jp', root).errors.join('\n'), /unexpected voice URL/);
+    assert.equal(checkVoices(manifest, 'kr', root).errors.length, 0);
+    banks.jp = {};
+    assert.match(checkVoices(manifest, 'jp', root).errors.join('\n'), /No JP voice files/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

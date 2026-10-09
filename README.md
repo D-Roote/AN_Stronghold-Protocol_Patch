@@ -24,13 +24,14 @@
 기본 한국어, 에셋 사전 다운로드, 팀 텍스트 채팅과 접이식 메뉴를 추가합니다.
 서비스의 추가 AI 팀원은 방마다 최대 1명으로 제한합니다.
 일부 UI 기계번역은 아직 남아 있습니다.
-한국어 음성은 공개 KR 덤프를 사용하며, 해당 음성이 없는 오퍼레이터는 무음입니다.
+한국어·일본어 음성을 함께 빌드하며, 설정의 **오퍼레이터 음성 언어**에서 선택합니다.
+기본값은 한국어이며 선택한 언어의 음성이 없는 오퍼레이터는 무음입니다.
 
 WSL Ubuntu/Linux, Python 3.10 이상, Git, Docker 및 Docker Compose가 필요합니다.
 호스트 Node.js 설치는 필요하지 않습니다.
 
 ~~~bash
-# 원본 받기·한국어 패치·로컬 에셋·최종 KR 이미지·Compose 설정까지 자동 준비
+# 원본 받기·한국어 패치·로컬 에셋·KR/JP 음성 이미지·Compose 설정까지 자동 준비
 python3 scripts/project.py setup
 
 # 이후 서비스는 Docker Compose로 관리
@@ -64,7 +65,7 @@ docker compose -f stack.cf-tunnel.yaml down
 
 패치나 원본 버전을 변경하면 프로젝트 루트에서 setup을 다시 실행합니다. 변경한 패치를 자동으로
 재적용하고 새 이미지를 빌드하므로, 이후 service/에서 docker compose -f stack.cf-tunnel.yaml up -d로 반영합니다.
-docker compose -f stack.cf-tunnel.yaml build도 준비된 소스로 KR 이미지를 다시 빌드할 수 있습니다.
+docker compose -f stack.cf-tunnel.yaml build도 준비된 소스로 KR/JP 음성 이미지를 다시 빌드할 수 있습니다.
 보조 검사는 python3 scripts/project.py check / verify로 실행할 수 있습니다.
 
 기본 배포는 복구본을 자동 생성하지 않습니다. 필요하면 서버를 중단하거나 재생성하여 적용합니다.

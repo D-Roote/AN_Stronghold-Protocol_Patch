@@ -12,7 +12,8 @@ export function checkVoices(manifest, lang, root = ROOT) {
   if (!LANGUAGES.has(lang)) throw new Error(`Unsupported voice language: ${lang}`);
   const errors = [];
   const files = new Set();
-  const chars = Object.keys(manifest.audio?.voice || {});
+  const bank = manifest.audio?.voicePacks?.[lang] ?? manifest.audio?.voice ?? {};
+  const chars = Object.keys(bank);
   const walk = (value, key) => {
     if (typeof value === 'string') {
       if (!value.startsWith(`/assets/audio/voice/${lang}/`) || value.includes('..') || value.includes('\\')) {
@@ -27,7 +28,7 @@ export function checkVoices(manifest, lang, root = ROOT) {
       errors.push(`${key}: invalid voice entry`);
     }
   };
-  walk(manifest.audio?.voice || {}, 'audio.voice');
+  walk(bank, `audio.voicePacks.${lang}`);
   if (!files.size) errors.push(`No ${lang.toUpperCase()} voice files in the manifest`);
   return { lang, chars: chars.length, files: files.size, errors };
 }
