@@ -1,27 +1,27 @@
 diff --git a/public/i18n/en.json b/public/i18n/en.json
-index 3c0d3b6ef5d8136957b71772b15c13dde72ad26b..84cae296b39eb5615d74923ad4c975ee625ec93b 100644
+index 546c888bde37e363a50a5638d6d2393810a14b2f..23b3b7b661599369cab203cbd41e50037753b827 100644
 --- a/public/i18n/en.json
 +++ b/public/i18n/en.json
-@@ -1224,5 +1224,19 @@
-   "收起游戏工具": "Collapse game menu",
-   "展开游戏工具": "Expand game menu",
-   "发送": "Send",
--  "发送中…": "Sending…"
-+  "发送中…": "Sending…",
-+  "请选择有效阵营": "Choose a valid faction",
-+  "炎": "Yan",
-+  "萨尔贡": "Sargon",
-+  "维多利亚": "Victoria",
+@@ -1248,5 +1248,19 @@
+   "聊天发送失败，请重试": "Chat failed to send. Try again.",
+   "连接断开，暂时无法发送聊天": "Disconnected. Chat is unavailable.",
+   "消息将在10秒后消失": "Messages disappear after 10 seconds",
+-  "请输入1至200字的聊天内容": "Enter a message of 1–200 characters"
++  "请输入1至200字的聊天内容": "Enter a message of 1–200 characters",
 +  "谢拉格": "Kjerag",
++  "{name}博士选择了{faction}阵营": "{name} chose the {faction} faction.",
++  "炎": "Yan",
++  "维多利亚": "Victoria",
++  "萨尔贡": "Sargon",
 +  "拉特兰": "Laterano",
++  "表情功能稍后提供": "Emotes will be added later",
 +  "阿戈尔": "Aegir",
 +  "叙拉古": "Siracusa",
 +  "卡西米尔": "Kazimierz",
-+  "{name}博士选择了{faction}阵营": "{name} chose the {faction} faction.",
-+  "表情与阵营": "Emotes and factions",
 +  "选择阵营": "Choose a faction",
-+  "表情功能稍后提供": "Emotes will be added later",
-+  "关闭聊天后，消息将在10秒后隐藏": "Messages fade 10 seconds after closing chat"
++  "请选择有效阵营": "Choose a valid faction",
++  "关闭聊天后，消息将在10秒后隐藏": "Messages fade 10 seconds after closing chat",
++  "表情与阵营": "Emotes and factions"
  }
 diff --git a/public/js/screens/bandDraft.js b/public/js/screens/bandDraft.js
 index 46d9e791638486232e5825be7df13e857d89af08..81dbf875d638ff5b0dd88199e0636dcb55bee7e6 100644
@@ -113,7 +113,7 @@ index 9768e3108f62f033c2dd1cfea2c00cb0ee070bf9..8a8982238b9c894f45ba99f8ea6c0248
        <div class="room-bar__left">
          <span class="room-bar__label">${t('模拟难度')}<${MicroLabel}>DIFFICULTY<//></span>
 diff --git a/server/lobby.js b/server/lobby.js
-index 6093abf987bda44e6348fccc128c5d980304a255..34109534876a368d07b5ab593aa2c2835371fff6 100644
+index 2d23c4dd0e85c0b80cb0aeffea876ab561d7ac33..65ca808f60be6f178f7a5337ea961a38c5b8957c 100644
 --- a/server/lobby.js
 +++ b/server/lobby.js
 @@ -105,7 +105,7 @@ import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
@@ -153,7 +153,7 @@ index 6093abf987bda44e6348fccc128c5d980304a255..34109534876a368d07b5ab593aa2c283
        case 'room.ready': return this.ready(session, msg);
        case 'room.setDifficulty': return this.setDifficulty(session, msg);
        case 'room.setAiPicksLast': return this.setAiPicksLast(session, msg);
-@@ -421,6 +424,31 @@ export class Lobby {
+@@ -423,6 +426,31 @@ export class Lobby {
      return OK;
    }
  
@@ -186,7 +186,7 @@ index 6093abf987bda44e6348fccc128c5d980304a255..34109534876a368d07b5ab593aa2c283
      const cur = this.roomOf(session);
      if (cur && cur.match) return fail(ERR.ROOM_STARTED, 'leave your running match first');
 diff --git a/shared/protocol.js b/shared/protocol.js
-index 176a93d139650d24866a65cff7d21a41a1e63f58..533dea166c98f2f0481f8560afef0fdf400f9716 100644
+index 089cbbd45dcfc9e0fcf8021be7f33564ff6cb71b..87f156d2b9408870d0a299e88868496bd3e4b95c 100644
 --- a/shared/protocol.js
 +++ b/shared/protocol.js
 @@ -5,7 +5,7 @@ import { DIFFICULTIES, NAME_MAX_LEN, ROOM_CODE_LEN, MAX_SEATS, EMOTES, GEO } fro
@@ -198,7 +198,7 @@ index 176a93d139650d24866a65cff7d21a41a1e63f58..533dea166c98f2f0481f8560afef0fdf
  
  // ---- tiny validators -------------------------------------------------------
  const isInt = (v, lo = -Infinity, hi = Infinity) => Number.isInteger(v) && v >= lo && v <= hi;
-@@ -385,6 +385,7 @@ export const C2S = {
+@@ -386,6 +386,7 @@ export const C2S = {
    'room.join': { code: (v) => isStr(v, ROOM_CODE_LEN + 2) && /^[A-Za-z0-9]+$/.test(v) },
    'room.leave': {},
    'room.chat': { text: (v) => normalizeChatText(v) !== null },
@@ -206,7 +206,7 @@ index 176a93d139650d24866a65cff7d21a41a1e63f58..533dea166c98f2f0481f8560afef0fdf
    'room.ready': { ready: isBool },
    'room.setDifficulty': { difficulty: (v) => DIFFICULTIES.includes(v) },
    // the co-op room option 「AI 队友最后选择」 (GitHub #338; host, before the match): the strategy and 机变 drafts order every
-@@ -468,7 +469,7 @@ export const C2S = {
+@@ -472,7 +473,7 @@ export const C2S = {
  // Server → client message types (documentation + client dispatch table keys).
  export const S2C = [
    'welcome', 'ok', 'error', 'pong',

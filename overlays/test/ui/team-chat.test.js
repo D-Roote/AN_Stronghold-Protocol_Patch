@@ -6,32 +6,51 @@ import {
 } from '../../public/js/ui/teamChat.js';
 
 describe('team chat UI: retained history and incoming closed preview', () => {
-  test('a close-time snapshot disappears exactly five seconds later without incoming messages', () => {
+  test('closing previews four newest entries for five seconds without deleting session history', () => {
     assert.equal(CHAT_CLOSED_PREVIEW_MS, 5000);
-    const messages = [{ id: 'first' }, { id: 'second' }];
+    const messages = Array.from({ length: 6 }, (_, n) => ({ id: `message-${n}`, receivedAt: 1000 }));
     const factions = { peer: 'kjeragShip' };
-    const preview = makeClosedChatPreview(messages, 1000, factions, 123);
+    const preview = makeClosedChatPreview(messages, 1000, factions);
+    assert.equal(messages.length, 6, 'the full history remains available when chat reopens');
     messages.push({ id: 'later' });
     factions.peer = 'egirShip';
     assert.deepEqual(preview.factions, { peer: 'kjeragShip' }, 'closed nickname markers also stay frozen');
-    assert.equal(preview.scrollTop, 123, 'the close-time visible scroll position is preserved');
-    assert.deepEqual(closedChatPreviewMessages(preview, 1000 + CHAT_CLOSED_PREVIEW_MS - 1).map((message) => message.id), ['first', 'second']);
+    assert.deepEqual(closedChatPreviewMessages(preview, 1000 + CHAT_CLOSED_PREVIEW_MS - 1).map((message) => message.id),
+      ['message-2', 'message-3', 'message-4', 'message-5']);
     assert.deepEqual(closedChatPreviewMessages(preview, 1000 + CHAT_CLOSED_PREVIEW_MS), []);
     assert.deepEqual(closedChatPreviewMessages(null, 1000), []);
   });
 
-  test('a newly received message refreshes the closed preview and scrolls to the newest entry', () => {
-    const messages = [{ id: 'old', receivedAt: 1000 }, { id: 'new', receivedAt: 4500 }];
+  test('new arrivals refresh the newest four previews without reviving expired stage history', () => {
+    const messages = [...Array.from({ length: 5 }, (_, n) => ({ id: `old-${n}`, receivedAt: 1000 })),
+      { id: 'new', receivedAt: 4500 }];
     const preview = receivedChatPreview(messages, 4700, { peer: 'egirShip' });
-    assert.deepEqual(preview.messages, messages);
-    assert.equal(preview.scrollTop, null);
+    assert.deepEqual(preview.messages.map((message) => message.id), ['old-2', 'old-3', 'old-4', 'new']);
+    assert.equal(messages.length, 6, 'receiving while closed retains the full history');
     assert.equal(preview.expiresAt, 9500);
     assert.deepEqual(preview.factions, { peer: 'egirShip' });
-    assert.equal(closedChatPreviewMessages(preview, 9499).length, 2);
+    assert.equal(closedChatPreviewMessages(preview, 5999).length, 4);
+    assert.deepEqual(closedChatPreviewMessages(preview, 6000).map((message) => message.id), ['new'],
+      'older entries expire individually even while the newest message is still visible');
+    assert.equal(closedChatPreviewMessages(preview, 9499).length, 1);
+    assert.equal(makeClosedChatPreview(messages.slice(-2), 4700).messages.length, 2, 'short histories stay short');
     assert.deepEqual(closedChatPreviewMessages(preview, 9500), []);
     assert.equal(receivedChatPreview(messages, 9500), null, 'stage remounts cannot revive expired messages');
     assert.equal(receivedChatPreview([], 5000), null);
     assert.equal(receivedChatPreview([{ receivedAt: NaN }], 5000), null);
+  });
+
+  test('new arrivals and reclosing never revive previously hidden entries, while history stays intact', () => {
+    const messages = [{ id: 'hidden', receivedAt: 1000 }, { id: 'boundary', receivedAt: 6000 },
+      { id: 'missing-timestamp' }, { id: 'fresh', receivedAt: 11000 }];
+    const received = receivedChatPreview(messages, 11000);
+    assert.deepEqual(received.messages.map((message) => message.id), ['fresh']);
+    const reclosed = makeClosedChatPreview(messages, 15999);
+    assert.deepEqual(reclosed.messages.map((message) => message.id), ['fresh']);
+    assert.equal(reclosed.expiresAt, 16000, 'reclosing does not restart the message lifetime');
+    assert.deepEqual(closedChatPreviewMessages(reclosed, 16000), []);
+    assert.deepEqual(makeClosedChatPreview(messages, 16000).messages, []);
+    assert.equal(messages.length, 4, 'expanded chat still has every retained entry');
   });
 
   test('names, faction events and hostile message markup stay literal Preact text children', () => {

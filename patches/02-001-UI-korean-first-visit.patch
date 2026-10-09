@@ -1,8 +1,8 @@
 diff --git a/public/js/ui/lang.js b/public/js/ui/lang.js
-index 644318b5b721b5c16e81e6fdcfd78ce568bb7406..4cc90027005483d5d6510643295e53ca1fccdd01 100644
+index a096b1a51c8cdaf7480b59022c0ed5108f4a3cec..b2383e89183c8c208d6ce263bd7104e253f7b443 100644
 --- a/public/js/ui/lang.js
 +++ b/public/js/ui/lang.js
-@@ -120,7 +120,7 @@ export async function loadLangChain(lang, doFetch = defaultFetch) {
+@@ -121,7 +121,7 @@ export async function loadLangChain(lang, doFetch = defaultFetch) {
  export const dataChain = (lang) => langChain(lang).filter((c) => langInfo(c)?.data !== false).map((c) => ({ code: c, url: langInfo(c)?.dataUrl }));
  
  /**
@@ -11,7 +11,7 @@ index 644318b5b721b5c16e81e6fdcfd78ce568bb7406..4cc90027005483d5d6510643295e53ca
   * code no pack is known for (boot without an index tries to load it).
   * @param {string} [search] location.search
   * @param {(key: string, fallback: any) => any} [load]
-@@ -134,7 +134,7 @@ export function initialLang(search = globalThis.location?.search || '', load = l
+@@ -135,7 +135,7 @@ export function initialLang(search = globalThis.location?.search || '', load = l
    if (fromUrl) return { lang: fromUrl, fromUrl: true };
    let stored = null;
    try { stored = pick(load(PREF_KEY, null)); } catch { /* ignore */ }
@@ -88,3 +88,19 @@ index eb955237a8a0c9c3bee5e5398871393642e8c9b6..d80f7e025bd90811b4b7830ecce077ac
        assert.deepEqual(await menu(page), SHIPPED);
        assert.deepEqual(problems, []);
      } finally {
+diff --git a/test/ui/followup-023.e2e.test.js b/test/ui/followup-023.e2e.test.js
+index 457cf7951eaa50cb89c65bed02b79c13e660e39c..734f3a5d4e45c353eac08589c63b8985651d5b54 100644
+--- a/test/ui/followup-023.e2e.test.js
++++ b/test/ui/followup-023.e2e.test.js
+@@ -89,7 +89,10 @@ describe('0.2.3 follow-up client features', { skip: !ENABLED }, () => {
+       await guest.click('[data-testid="resume-local-match"]');
+       await guest.waitForSelector('.modal .btn--block');
+       await guest.click('.modal .btn--block');
+-      await guest.waitForFunction(() => document.body.textContent.includes('此对局仍在其他窗口中'));
++      await guest.waitForFunction(async () => {
++        const { t } = await import('/shared/i18n.js');
++        return document.body.textContent.includes(t('此对局仍在其他窗口中，或当前浏览器无法安全恢复。请关闭原窗口后重试。'));
++      });
+       assert.equal(await owner.evaluate(() => sessionStorage.getItem('sp.token')), before.token);
+       await owner.evaluate(() => globalThis.finishIdentityInit());
+       await owner.waitForFunction(() => globalThis.__SP__?.store.get().match.public?.phase === 'INFO_CHECK');

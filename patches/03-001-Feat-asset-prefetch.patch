@@ -1,46 +1,46 @@
 diff --git a/public/i18n/en.json b/public/i18n/en.json
-index d63f297a3e14bfcd5ad9f5772c43dff0bfecfa09..0f27345945af5264fdddea67b95e4cee5cbc6f4a 100644
+index f272549400b51ced7e7de64934685f0b83d11edc..e6e3d6a012563f7645f4c5ff68d17285036d0e80 100644
 --- a/public/i18n/en.json
 +++ b/public/i18n/en.json
-@@ -1183,5 +1183,32 @@
-   "精英2": "E2",
-   "精英2 Lv.60": "E2 Lv.60",
-   "开始模拟前可调整干员携带的技能与模组，以及潜能与练度；干员的局内等级不可调整": "Before the simulation starts you can change the Skills and Modules your Operators carry, and their potential and development; Operator levels in the match cannot be changed",
--  "默认满潜能、精英2 Lv.60（满加成）。官方的潜能取你自己的潜能，练度是自持有加成（已持有的同名干员的养成，攻击 / 防御 / 生命单独乘算）；未持有的特许干员在官方按潜能1、没有加成，要照官方打请手动设为潜能1、未精英化。": "Default: max Potential, Elite 2 Lv.60 (the full bonus). Officially, Potential is your own and development is the owned-operator bonus (your training of the same Operator: ATK / DEF / HP, a separate multiplier); a licensed Operator you do not own fights at Potential 1 with no bonus — to play it that way, set Potential 1 and Non-Elite here."
-+  "默认满潜能、精英2 Lv.60（满加成）。官方的潜能取你自己的潜能，练度是自持有加成（已持有的同名干员的养成，攻击 / 防御 / 生命单独乘算）；未持有的特许干员在官方按潜能1、没有加成，要照官方打请手动设为潜能1、未精英化。": "Default: max Potential, Elite 2 Lv.60 (the full bonus). Officially, Potential is your own and development is the owned-operator bonus (your training of the same Operator: ATK / DEF / HP, a separate multiplier); a licensed Operator you do not own fights at Potential 1 with no bonus — to play it that way, set Potential 1 and Non-Elite here.",
-+  "尚未开始": "Not started",
-+  "正在准备": "Preparing",
-+  "正在下载": "Downloading",
-+  "已暂停": "Paused",
-+  "下载完成": "Download complete",
-+  "部分资源未完成": "Some assets are incomplete",
-+  "此浏览器无法保存资源缓存": "This browser cannot store asset caches",
-+  "按需加载": "Load when needed",
-+  "同意并下载": "Accept and download",
-+  "清除资源缓存": "Clear asset cache",
-+  "暂停下载": "Pause download",
-+  "重试下载": "Retry download",
+@@ -1207,5 +1207,32 @@
+   "请等待所有玩家连接后再发起投票": "Wait for all players to connect before starting a vote.",
+   "同意重刷": "Agree to reroll",
+   "拒绝重刷": "Reject reroll",
+-  "取消投票": "Cancel vote"
++  "取消投票": "Cancel vote",
 +  "继续下载": "Resume download",
-+  "游戏资源下载": "Game asset download",
-+  "资源下载": "Asset download",
-+  "提前下载游戏资源": "Download game assets in advance",
 +  "是否提前下载游戏资源？": "Download game assets in advance?",
-+  "预计约 {size}，包含图片、模型、语音和本地字体。": "About {size}, including images, models, voices and local fonts.",
-+  "同意后会在后台下载，游戏仍可照常使用。选择按需加载也能正常游戏。": "With your consent, assets download in the background while you play. You can also play normally with on-demand loading.",
-+  "资源保存在此浏览器中，可暂停、继续或清除。浏览器清理缓存后需要重新下载。": "Assets stay in this browser. Pause, resume or clear them any time. Clearing browser data requires another download.",
-+  "此浏览器无法保存资源缓存，游戏将继续按需加载。": "This browser cannot store asset caches. The game will load assets when needed.",
-+  "下载进度": "Download progress",
-+  "已保存 {done} / {total} 个文件": "Saved {done} / {total} files",
-+  "本次下载 {size} · 已有缓存 {count} 个": "Downloaded {size} · {count} already cached",
++  "部分资源未完成": "Some assets are incomplete",
 +  "{count} 个文件下载失败，可稍后重试。": "{count} files failed to download. You can retry later.",
++  "本次下载 {size} · 已有缓存 {count} 个": "Downloaded {size} · {count} already cached",
 +  "浏览器存储空间不足，下载已停止。可清除资源缓存后重试，或继续按需加载。": "Browser storage is full. Download paused. Clear the asset cache and retry, or keep loading assets on demand.",
-+  "下载暂时未完成。已保存的资源会保留，游戏仍可使用。": "Download is incomplete. Saved assets remain available and you can keep playing."
++  "正在下载": "Downloading",
++  "按需加载": "Load when needed",
++  "重试下载": "Retry download",
++  "下载暂时未完成。已保存的资源会保留，游戏仍可使用。": "Download is incomplete. Saved assets remain available and you can keep playing.",
++  "尚未开始": "Not started",
++  "暂停下载": "Pause download",
++  "资源保存在此浏览器中，可暂停、继续或清除。浏览器清理缓存后需要重新下载。": "Assets stay in this browser. Pause, resume or clear them any time. Clearing browser data requires another download.",
++  "提前下载游戏资源": "Download game assets in advance",
++  "此浏览器无法保存资源缓存": "This browser cannot store asset caches",
++  "已保存 {done} / {total} 个文件": "Saved {done} / {total} files",
++  "正在准备": "Preparing",
++  "清除资源缓存": "Clear asset cache",
++  "同意后会在后台下载，游戏仍可照常使用。选择按需加载也能正常游戏。": "With your consent, assets download in the background while you play. You can also play normally with on-demand loading.",
++  "同意并下载": "Accept and download",
++  "已暂停": "Paused",
++  "资源下载": "Asset download",
++  "下载进度": "Download progress",
++  "预计约 {size}，包含图片、模型、语音和本地字体。": "About {size}, including images, models, voices and local fonts.",
++  "此浏览器无法保存资源缓存，游戏将继续按需加载。": "This browser cannot store asset caches. The game will load assets when needed.",
++  "下载完成": "Download complete",
++  "游戏资源下载": "Game asset download"
  }
 diff --git a/public/index.html b/public/index.html
-index d5991efafa26fda73d513f8def16bd927a7fb639..652c7ff7583abe0ce04f668fb2522580005a39e3 100644
+index 3e07c2053ed51e210b000932c95077657639e728..0cc9286a37ecf007b04c1e7165144a77b94a4f99 100644
 --- a/public/index.html
 +++ b/public/index.html
-@@ -40,6 +40,7 @@
+@@ -45,6 +45,7 @@
    <link rel="stylesheet" href="/css/screens/loadout.css" />
    <link rel="stylesheet" href="/css/screens/stats.css" />
    <link rel="stylesheet" href="/css/emotes.css" />
@@ -49,7 +49,7 @@ index d5991efafa26fda73d513f8def16bd927a7fb639..652c7ff7583abe0ce04f668fb2522580
  
    <script type="importmap">
 diff --git a/public/js/main.js b/public/js/main.js
-index 9aa062798c755353f90b31731af17bb449121892..ac293bd2323358e2c775619953de78549ba03ef5 100644
+index 4002509e5867d564cb8f28960ebf479dcbd1ff84..532ae64fed27107d5f3e327d841f77edd629d902 100644
 --- a/public/js/main.js
 +++ b/public/js/main.js
 @@ -45,6 +45,7 @@ import { LobbyScreen, rememberRoom, parseRoomParam } from './screens/lobby.js';
@@ -60,7 +60,7 @@ index 9aa062798c755353f90b31731af17bb449121892..ac293bd2323358e2c775619953de7854
  import { settingsStore } from './ui/settings.js';
  import { GuideHost } from './ui/guide.js';
  import { installDeviceSupport } from './ui/device.js';
-@@ -297,6 +298,7 @@ function App() {
+@@ -305,6 +306,7 @@ function App() {
      <${GuideHost} />
      <${LoadoutHost} />
      <${StatsHost} />
@@ -69,18 +69,18 @@ index 9aa062798c755353f90b31731af17bb449121892..ac293bd2323358e2c775619953de7854
  }
  
 diff --git a/public/js/ui/settings.js b/public/js/ui/settings.js
-index 237a7d8aa690859deb1f7ff77b2e05637b41e89a..b83fdcfae926a4beb4d605733283152ce121d380 100644
+index 1ab6cffe80892bb764e3bb810e01501ec3d336c4..56c18b38bdb24cc430289f356a33a4f99d40048c 100644
 --- a/public/js/ui/settings.js
 +++ b/public/js/ui/settings.js
-@@ -15,6 +15,7 @@ import { createStore, useStore, loadPref, savePref, store } from '../store.js';
- import { sanitizeSettings, HOTKEY_ACTIONS, DEFAULT_HOTKEYS, hotkeyLabel, rebindHotkey, isDefaultHotkeys, captureHotkey, VOICE_LANGS } from './gameLogic.js';
+@@ -21,6 +21,7 @@ import { createStore, useStore, loadPref, savePref, store } from '../store.js';
+ import { sanitizeSettings, HOTKEY_ACTIONS, DEFAULT_HOTKEYS, hotkeyLabel, rebindHotkey, isDefaultHotkeys, captureHotkey, VOICE_LANGS, TEXT_SIZES } from './gameLogic.js';
  import { audio } from '../audio.js';
  import { openGuide } from './guide.js';
 +import { openAssetPrefetchControls } from '../assetPrefetch.js';
  import { detectFeatures } from './device.js';
  import { LangToggle, machineTranslationNote } from './lang.js';
  import { t, tc, N_ } from '../../../shared/i18n.js';
-@@ -224,6 +225,10 @@ export function SettingsModal({ open, onClose }) {
+@@ -250,6 +251,10 @@ export function SettingsModal({ open, onClose }) {
          <${LangToggle} class="set-lang" />
        </div>
        ${mtNote ? html`<p class="set-hint set-lang-note" data-testid="lang-mt-note">${mtNote}</p>` : null}
@@ -91,3 +91,16 @@ index 237a7d8aa690859deb1f7ff77b2e05637b41e89a..b83fdcfae926a4beb4d605733283152c
        <${Slider} label=${t('背景音乐')} micro="BGM" icon="play" value=${s.bgm} onInput=${(v) => updateSettings({ bgm: v })} />
        <${Slider} label=${t('干员语音')} micro="VOICE" icon="mic" value=${s.voice} onInput=${(v) => updateSettings({ voice: v })} />
        <div class="set-row">
+diff --git a/test/ui/followup-023.e2e.test.js b/test/ui/followup-023.e2e.test.js
+index 734f3a5d4e45c353eac08589c63b8985651d5b54..b683accb06bd05ee01d7e4127db2a3d04d77bfef 100644
+--- a/test/ui/followup-023.e2e.test.js
++++ b/test/ui/followup-023.e2e.test.js
+@@ -18,7 +18,7 @@ describe('0.2.3 follow-up client features', { skip: !ENABLED }, () => {
+     const page = await ctx.newPage();
+     await page.setViewport({ width: phone ? 844 : 1440, height: phone ? 390 : 900 });
+     if (random != null) await page.evaluateOnNewDocument((value) => { Math.random = () => value; }, random);
+-    await page.evaluateOnNewDocument(() => { localStorage.setItem('sp.name', 'Recovery Test'); sessionStorage.setItem('sp.entered', '1'); });
++    await page.evaluateOnNewDocument(() => { localStorage.setItem('sp.name', 'Recovery Test'); sessionStorage.setItem('sp.entered', '1'); localStorage.setItem('sp.pref.assetDownload', JSON.stringify({ decision: 'declined', paused: true })); });
+     await page.goto(base, { waitUntil: 'domcontentloaded' });
+     await page.waitForFunction(() => globalThis.__SP__?.store.get().connection.status === 'online' && document.querySelector('.lobby-screen'));
+     return page;

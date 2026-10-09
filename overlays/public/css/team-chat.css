@@ -349,6 +349,8 @@
 .title-conn__status { display: inline-flex; align-items: center; justify-content: center; gap: max(.1rem, 6px); white-space: nowrap; }
 .title-guide { white-space: nowrap; }
 .title-foot { gap: max(.18rem, 12px); }
+.title-foot__left { display: flex; flex: 1 1 auto; min-width: 0; flex-direction: column; gap: max(.1rem, 8px); }
+.title-foot__actions { display: flex; flex-wrap: wrap; gap: max(.1rem, 8px); }
 .title-foot__copyright { min-width: 0; overflow-wrap: anywhere; }
 .title-foot__right { display: flex; flex: 0 0 auto; flex-direction: column; align-items: flex-end; gap: max(.12rem, 9px); }
 .title-tools { display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-end; gap: max(.1rem, 8px); }
@@ -362,7 +364,7 @@
   min-width: max(.72rem, 60px);
   padding: 0 max(.07rem, 5px);
   gap: max(.05rem, 4px);
-  font-size: max(.14rem, 12px);
+  font-size: max(calc(.14 * var(--t)), 12px);
   line-height: 1;
   white-space: nowrap;
 }
@@ -409,7 +411,7 @@
   .room-screen .topbar :is(.stats-entry, .settings-btn, .guide-btn) {
     min-width: 44px;
     min-height: 32px;
-    font-size: max(.14rem, 12px);
+    font-size: max(calc(.14 * var(--t)), 12px);
     white-space: nowrap;
   }
 }

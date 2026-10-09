@@ -61,6 +61,28 @@ test('an old KR decode resolving after a JP switch cannot start a sound or relea
   assert.equal(manager.voice('char_a', 'place'), false, 'the JP line still holds the gate');
 });
 
+test('native per-operator overrides select KR/JP packs and changing one invalidates the previous voice', () => {
+  const id = 'char_263_skadi';
+  const packs = { audio: { voicePacks: { kr: { [id]: manifest.audio.voicePacks.kr.char_a },
+    jp: { [id]: manifest.audio.voicePacks.jp.char_a } } } };
+  const manager = new AudioManager({ win: null, getManifest: () => packs });
+  manager.setVoiceLang('kr', { [id]: 'jp' });
+  manager.ctx = {}; manager.voiceGain = {};
+  const requested = [];
+  manager._playVoice = (url) => requested.push(url);
+  assert.equal(manager.voice(id, 'select'), true);
+  assert.equal(requested[0], jp, 'the operator override wins over the global KR setting');
+  const previous = manager.voiceToken;
+  manager.setVoiceLang('kr', { [id]: 'kr' });
+  assert.ok(manager.voiceToken > previous);
+  assert.equal(manager.voice(id, 'select'), true);
+  assert.equal(requested[1], kr);
+  manager.setVoiceLang('jp', {});
+  assert.equal(manager.voice(id, 'select'), true);
+  assert.equal(requested[2], jp, 'removing an override follows the current global choice');
+  assert.equal(manager.voice('char_kr_only', 'select'), false, 'a missing dub does not fall back to another pack');
+});
+
 test('upgrading preserves the old JP preference once, while new settings take precedence', () => {
   assert.deepEqual(migrateVoiceSettings(null, 'jp'), { voiceLang: 'jp' });
   assert.deepEqual(migrateVoiceSettings({ bgm: .3 }, 'jp'), { bgm: .3, voiceLang: 'jp' });

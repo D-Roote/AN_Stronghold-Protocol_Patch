@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "type": "data-localization",
+  "language": "ko",
+  "source": {
+    "tag": "v0.2.3",
+    "commit": "1db8e51023ae6abaec9370beb81a513d5c4d0b01"
+  },
+  "file": "data/i18n/ko.json",
+  "changes": [
+    {
+      "path": ["files", "config", "modes", "mode_single_abyss", "desc"],
+      "base": "적의 공격 강도하 한계를 뛰어넘은 시뮬레이션",
+      "value": "적의 공격 강도가 한계를 뛰어넘은 시뮬레이션"
+    },
+    {
+      "path": ["files", "config", "modes", "mode_multi_abyss", "desc"],
+      "base": "적의 공격 강도하 한계를 뛰어넘은 시뮬레이션",
+      "value": "적의 공격 강도가 한계를 뛰어넘은 시뮬레이션"
+    }
+  ]
+}

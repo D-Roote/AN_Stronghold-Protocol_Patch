@@ -13,6 +13,7 @@ import { emoteUiSprite } from './emotes.js';
 
 export const TEAM_CHAT_CSS_HREF = '/css/team-chat.css';
 const CHAT_EMPTY_IDLE_MS = 5000;
+const CHAT_CLOSED_PREVIEW_LIMIT = 4;
 
 /** Also load the stylesheet in development harnesses that do not use the main index. */
 export function ensureTeamChatCss(doc = globalThis.document) {
@@ -25,20 +26,27 @@ export function ensureTeamChatCss(doc = globalThis.document) {
   return true;
 }
 
-/** A bounded visual snapshot; closing or receiving a message starts its five-second lifetime. */
-export function makeClosedChatPreview(messages, now = Date.now(), factions = {}, scrollTop = 0) {
-  return { messages: Array.isArray(messages) ? [...messages] : [], factions: { ...factions }, scrollTop, expiresAt: now + CHAT_CLOSED_PREVIEW_MS };
+function freshChatPreviewMessages(messages, now) {
+  return Array.isArray(messages) ? messages.filter((message) => Number.isFinite(message?.receivedAt)
+    && message.receivedAt + CHAT_CLOSED_PREVIEW_MS > now).slice(-CHAT_CLOSED_PREVIEW_LIMIT) : [];
+}
+
+/** Each entry expires five seconds after reception; opening or closing must not revive old history. */
+export function makeClosedChatPreview(messages, now = Date.now(), factions = {}) {
+  const recent = freshChatPreviewMessages(messages, now);
+  return { messages: recent, factions: { ...factions },
+    expiresAt: Math.max(now, ...recent.map((message) => message.receivedAt + CHAT_CLOSED_PREVIEW_MS)) };
 }
 
 export function closedChatPreviewMessages(preview, now = Date.now()) {
-  return preview && Number.isFinite(preview.expiresAt) && preview.expiresAt > now ? preview.messages : [];
+  return preview && Number.isFinite(preview.expiresAt) && preview.expiresAt > now
+    ? freshChatPreviewMessages(preview.messages, now) : [];
 }
 
 /** Remounting between match stages must not make old messages appear new. */
 export function receivedChatPreview(messages, now = Date.now(), factions = {}) {
-  const receivedAt = messages?.at(-1)?.receivedAt;
-  if (!Number.isFinite(receivedAt) || receivedAt + CHAT_CLOSED_PREVIEW_MS <= now) return null;
-  return makeClosedChatPreview(messages, receivedAt, factions, null);
+  const preview = makeClosedChatPreview(messages, now, factions);
+  return preview.messages.length ? preview : null;
 }
 
 /** The same state drives the disabled button and submit guard (Enter included). */
@@ -214,8 +222,6 @@ export function TeamChat({
   const wasOpen = useRef(open);
   const messageRef = useRef(state.messages || []);
   const factionRef = useRef(state.factions || {});
-  const previewTimer = useRef(null);
-  const feedScroll = useRef(0);
   const seenMessage = useRef(null);
   messageRef.current = state.messages || [];
   factionRef.current = state.factions || {};
@@ -234,20 +240,21 @@ export function TeamChat({
     seenMessage.current = last?.id || null;
     const closing = !open && wasOpen.current;
     if (open || !last || closing || incoming) {
-      if (previewTimer.current != null) clearTimeout(previewTimer.current);
-      previewTimer.current = null;
-      const next = open || !last ? null : closing
-        ? makeClosedChatPreview(messageRef.current, Date.now(), factionRef.current, feedScroll.current)
-        : receivedChatPreview(messageRef.current, Date.now(), factionRef.current);
-      setPreview(next);
-      if (next) previewTimer.current = setTimeout(() => {
-        previewTimer.current = null;
-        setPreview(null);
-      }, Math.max(1, next.expiresAt - Date.now()));
+      setPreview(open || !last ? null : receivedChatPreview(messageRef.current, Date.now(), factionRef.current));
     }
     wasOpen.current = open;
   }, [open, state.messages, state.factions]);
-  useEffect(() => () => { if (previewTimer.current != null) clearTimeout(previewTimer.current); }, []);
+  useLayoutEffect(() => {
+    if (open || !preview) return undefined;
+    const visible = closedChatPreviewMessages(preview);
+    if (!visible.length) { setPreview(null); return undefined; }
+    const nextExpiry = Math.min(...visible.map((message) => message.receivedAt + CHAT_CLOSED_PREVIEW_MS));
+    const timer = setTimeout(() => setPreview((current) => {
+      const remaining = closedChatPreviewMessages(current);
+      return remaining.length ? { ...current, messages: remaining } : null;
+    }), Math.max(1, nextExpiry - Date.now()));
+    return () => clearTimeout(timer);
+  }, [preview, open]);
   useEffect(() => {
     if (!open) { setPickerOpen(false); setComposing(false); }
   }, [open]);
@@ -261,8 +268,7 @@ export function TeamChat({
   useLayoutEffect(() => {
     const feed = rootRef.current?.querySelector('.team-chat__feed');
     if (!feed) return;
-    feed.scrollTop = open || preview?.scrollTop == null ? feed.scrollHeight : preview.scrollTop;
-    if (open) feedScroll.current = feed.scrollTop;
+    feed.scrollTop = feed.scrollHeight;
   }, [state.messages, preview, open]);
   useDismissible({
     rootRef, toggleRef, focusRef: inputRef, open, onToggle,
@@ -308,8 +314,7 @@ export function TeamChat({
       if (open || (event.target === toggleRef.current && [' ', 'Enter'].includes(event.key))) event.stopPropagation();
     }}>
     ${open || messages.length ? html`<section id="team-chat-panel" class=${`team-chat__panel${open ? '' : ' is-feed-only'}`} aria-label=${t('队伍聊天')}>
-      <${TeamChatFeed} messages=${messages} factions=${open ? state.factions || {} : preview?.factions || {}} playerId=${playerId}
-        onScroll=${(event) => { if (open) feedScroll.current = event.currentTarget.scrollTop; }} />
+      <${TeamChatFeed} messages=${messages} factions=${open ? state.factions || {} : preview?.factions || {}} playerId=${playerId} />
       ${open ? html`<form class="team-chat__form" onSubmit=${submit}>
         <div class="team-chat__compose">
           <input id="team-chat-input" class="team-chat__input" ref=${inputRef} type="text" value=${text} maxlength=${CHAT_MAX_LENGTH * 2}

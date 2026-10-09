@@ -1,0 +1,210 @@
+diff --git a/public/css/screens/briefing.css b/public/css/screens/briefing.css
+index a6e7fc238649fd92d74eb2c9bbda7a26b16aa56e..aa93a13de1f224c3e9f85849a5fca0dfc2efc4a2 100644
+--- a/public/css/screens/briefing.css
++++ b/public/css/screens/briefing.css
+@@ -106,21 +106,9 @@
+ .brief-ready__pips i.on { color: var(--mint-400); filter: drop-shadow(0 0 .06rem rgba(23, 249, 183, .6)); }
+ .brief-ready__pips i.me { border-bottom: 2px solid var(--mint-700); }
+ 
+-/* Full setup reroll: consent stays visible alongside the information being confirmed. */
+-.brief-reroll {
+-  position: relative; z-index: 2; flex: none;
+-  display: flex; align-items: center; justify-content: space-between; gap: .2rem;
+-  margin: .1rem .5rem 0; padding: .14rem .2rem;
+-  background: rgba(12, 15, 14, .9); border: 1px solid var(--mint-700);
+-}
+-.brief-reroll__text { display: flex; flex-direction: column; gap: .05rem; min-width: 0; font-size: calc(.16 * var(--t)); }
+-.brief-reroll__text strong { font-size: calc(.2 * var(--t)); color: var(--mint-400); }
+-.brief-reroll__text > span { color: var(--text-lo); }
+-.brief-reroll__players { display: flex; flex-wrap: wrap; gap: .08rem .2rem; color: var(--text-dim); }
+-.brief-reroll__players .is-agreed { color: var(--mint-400); }
+-.brief-reroll__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .1rem; flex-shrink: 0; }
+-@media (max-width: 900px) {
+-  .brief-reroll { margin-inline: .3rem; gap: .1rem; padding: .1rem .14rem; }
+-  .brief-reroll__actions { flex-shrink: 1; }
+-  .brief-reroll__actions .btn { min-height: .44rem; padding-inline: .12rem; }
+-}
++/* The native vote uses the previous patch's compact footer controls, without a separate information row. */
++.brief .brief__foot { gap: max(.4rem, 24px); }
++.brief-actions { display: inline-flex; align-items: center; gap: max(.2rem, 12px); flex: 0 0 auto; }
++.brief-reroll { display: inline-flex; align-items: center; gap: max(.07rem, 4px); flex: 0 0 auto; }
++.brief-reroll .brief-restart { white-space: nowrap; }
++.brief-reroll .brief-reroll-reject { flex: 0 0 auto; }
+diff --git a/public/i18n/en.json b/public/i18n/en.json
+index f272549400b51ced7e7de64934685f0b83d11edc..cc57b47ca173e5190bdafcf9d24a04bf7d1088bd 100644
+--- a/public/i18n/en.json
++++ b/public/i18n/en.json
+@@ -1197,6 +1197,9 @@
+   "此对局仍在其他窗口中，或当前浏览器无法安全恢复。请关闭原窗口后重试。": "This match is still open in another window, or this browser cannot safely resume it. Close the original window and retry.",
+   "选择已关闭窗口的对局。服务器重启或对局过期后无法恢复。": "Select a match from a closed window. Matches cannot be resumed after a server restart or expiry.",
+   "{name} · 同盟 {code}": "{name} · Alliance {code}",
++  "重启投票": "Restart vote",
++  "重启 {n} / {total}": "Restart {n} / {total}",
++  "仅房主可以发起重刷投票": "Only the host can request a restart vote.",
+   "重刷本局": "Reroll setup",
+   "重刷本局投票：{agreed}/{total}": "Reroll vote: {agreed}/{total}",
+   "全员同意后重新随机战场、领袖、特训敌人和禁用；确认倒计时已暂停。": "With unanimous consent, reroll the field, bosses, training enemies and bans. The confirmation timer is paused.",
+diff --git a/public/i18n/ja.json b/public/i18n/ja.json
+index c26fd069feab53a59b6a092406157944efe7a0a7..44f8002973d0e4bc87d07b9d4cc398b59d850834 100644
+--- a/public/i18n/ja.json
++++ b/public/i18n/ja.json
+@@ -1203,6 +1203,9 @@
+   "此对局仍在其他窗口中，或当前浏览器无法安全恢复。请关闭原窗口后重试。": "別のウィンドウで対戦中か、このブラウザーでは安全に復帰できません。元のウィンドウを閉じて再試行してください。",
+   "选择已关闭窗口的对局。服务器重启或对局过期后无法恢复。": "閉じたウィンドウの対戦を選択してください。サーバー再起動後や期限切れの場合は復帰できません。",
+   "{name} · 同盟 {code}": "{name} · 同盟 {code}",
++  "重启投票": "再開始投票",
++  "重启 {n} / {total}": "再開始 {n} / {total}",
++  "仅房主可以发起重刷投票": "ルーム作成者のみ再開始投票を開始できます。",
+   "重刷本局": "開始条件を再抽選",
+   "重刷本局投票：{agreed}/{total}": "再抽選の投票：{agreed}/{total}",
+   "全员同意后重新随机战场、领袖、特训敌人和禁用；确认倒计时已暂停。": "全員の同意で戦場、ボス、特訓の敵と禁止対象を再抽選します。確認の制限時間は一時停止中です。",
+diff --git a/public/i18n/zh-TW.json b/public/i18n/zh-TW.json
+index d4687d388af4aa2825597bdb158b4d1fb01fe97f..541fa6877e7da9b695586ee4bedd16e6309db96b 100644
+--- a/public/i18n/zh-TW.json
++++ b/public/i18n/zh-TW.json
+@@ -1201,6 +1201,9 @@
+   "此对局仍在其他窗口中，或当前浏览器无法安全恢复。请关闭原窗口后重试。": "此對局仍在其他視窗中，或目前瀏覽器無法安全恢復。請關閉原視窗後重試。",
+   "选择已关闭窗口的对局。服务器重启或对局过期后无法恢复。": "選擇已關閉視窗的對局。伺服器重啟或對局過期後無法恢復。",
+   "{name} · 同盟 {code}": "{name} · 同盟 {code}",
++  "重启投票": "重啟投票",
++  "重启 {n} / {total}": "重啟 {n} / {total}",
++  "仅房主可以发起重刷投票": "只有房主可以發起重新抽選投票。",
+   "重刷本局": "重刷本局",
+   "重刷本局投票：{agreed}/{total}": "重刷本局投票：{agreed}/{total}",
+   "全员同意后重新随机战场、领袖、特训敌人和禁用；确认倒计时已暂停。": "全員同意後重新隨機戰場、領袖、特訓敵人和禁用；確認倒數已暫停。",
+diff --git a/public/js/screens/briefing.js b/public/js/screens/briefing.js
+index 7c5b08458ee46a70c1b6c2e87b4a95e084fafede..880afd33fa677b990e64678c486829b8a0b47aff 100644
+--- a/public/js/screens/briefing.js
++++ b/public/js/screens/briefing.js
+@@ -92,15 +92,19 @@
+         <${MatchInfo} model=${info} />
+       </section>
+     </main>
+-    <${SetupReroll} pub=${pub} />
+     <footer class="brief__foot">
+-      <${LoadoutButton} from="briefing" size="lg" class="brief-loadout" />
+-      <div class="brief-ready">
+-        <span class="brief-ready__txt">${t('已就绪')} <b class="num">${readyN}</b><span class="num">/${players.length}</span></span>
+-        <span class="brief-ready__pips">${players.map((p) => html`<i key=${p.playerId} class=${cx(p.ready && 'on', p.playerId === myId && 'me')} title=${p.name}><${Icon} name="user" /></i>`)}</span>
++      <div class="brief-actions brief-actions--setup">
++        <${LoadoutButton} from="briefing" size="lg" class="brief-loadout" />
++        <${SetupReroll} pub=${pub} />
+       </div>
+-      <${Button} variant="primary" size="xl" icon=${me?.ready ? 'check' : me ? 'play' : 'eye'} active=${!!me?.ready} loading=${busy}
+-        disabled=${!!me?.ready || !me || !!pub.rerollVote} onClick=${ready}>${me?.ready ? t('已就绪') : me ? t('准备就绪') : t('观战中')}<//>
++      <div class="brief-actions brief-actions--ready">
++        <div class="brief-ready">
++          <span class="brief-ready__txt">${t('已就绪')} <b class="num">${readyN}</b><span class="num">/${players.length}</span></span>
++          <span class="brief-ready__pips">${players.map((p) => html`<i key=${p.playerId} class=${cx(p.ready && 'on', p.playerId === myId && 'me')} title=${p.name}><${Icon} name="user" /></i>`)}</span>
++        </div>
++        <${Button} variant="primary" size="xl" icon=${me?.ready ? 'check' : me ? 'play' : 'eye'} active=${!!me?.ready} loading=${busy}
++          disabled=${!!me?.ready || !me || !!pub.rerollVote} onClick=${ready}>${me?.ready ? t('已就绪') : me ? t('准备就绪') : t('观战中')}<//>
++      </div>
+     </footer>
+     <${ExitModal} open=${exit} onClose=${() => setExit(false)} solo=${solo} />
+   </div>`;
+diff --git a/public/js/ui/setupReroll.js b/public/js/ui/setupReroll.js
+index 5a1e5ad9377fdf4e7e1dc781c2862b762af54d05..db82ac51d80b7fcc09702ffb63c710170c997cbd 100644
+--- a/public/js/ui/setupReroll.js
++++ b/public/js/ui/setupReroll.js
+@@ -1,8 +1,9 @@
+-// A server-owned unanimous vote. Reconnects render the current vote from m.public.
++// Compact controls for the server-owned unanimous vote. Reconnects still render m.public.
+ import { useRef, useState } from '../../vendor/hooks.module.js';
+ import { html, Button } from './components.js';
+ import { actions } from './gameActions.js';
+ import { useStore } from '../store.js';
++import { setupRerollControl } from '../setupRerollControl.js';
+ import { t } from '../../../shared/i18n.js';
+ 
+ export function SetupReroll({ pub }) {
+@@ -11,39 +12,31 @@
+   const online = useStore((s) => s.connection.status === 'online');
+   const [busy, setBusy] = useState(false);
+   const pending = useRef(false);
+-  const vote = pub.rerollVote;
+-  const host = myId === hostId;
+-  const players = pub.players || [];
+-  const me = players.find((p) => p.playerId === myId && p.status !== 'left');
+-  const allConnected = players.every((p) => p.isBot || p.status === 'left' || p.connected);
+-  const voter = !!vote?.voters.includes(myId);
+-  const agreed = !!vote?.agreed.includes(myId);
++  const control = setupRerollControl(pub, { playerId: myId, hostId, online });
+   const send = async (fn) => {
+     if (pending.current) return;
+     pending.current = true;
+     setBusy(true);
+     try { await fn(); } finally { pending.current = false; setBusy(false); }
+   };
+-  if (!vote && (!host || !me)) return null;
+-  return html`<section class="brief-reroll" aria-label=${t('重刷本局')} aria-live="polite">
+-    <div class="brief-reroll__text">
+-      <strong>${vote ? t('重刷本局投票：{agreed}/{total}', { agreed: vote.agreed.length, total: vote.voters.length }) : t('重刷本局')}</strong>
+-      <span>${vote ? t('全员同意后重新随机战场、领袖、特训敌人和禁用；确认倒计时已暂停。') : t('保留房间和个人配置，重新随机全部开局信息。')}</span>
+-      ${vote ? html`<div class="brief-reroll__players">${vote.voters.map((id) => {
+-        const p = players.find((p) => p.playerId === id);
+-        return html`<span key=${id} class=${vote.agreed.includes(id) ? 'is-agreed' : ''}>${p?.name || id} · ${vote.agreed.includes(id) ? t('已同意') : t('待同意')}</span>`;
+-      })}</div>` : null}
+-    </div>
+-    <div class="brief-reroll__actions">
+-      ${!vote ? html`<${Button} icon="refresh" size="lg" loading=${busy} disabled=${!online || !allConnected}
+-        title=${allConnected ? t('全体真人玩家一致同意后刷新，随机结果可能重复。') : t('请等待所有玩家连接后再发起投票')}
+-        onClick=${() => send(() => actions.rerollSetup(pub.setupRevision ?? 0))}>${t('重刷本局')}<//>` : null}
+-      ${vote && voter ? html`<${Button} variant="primary" loading=${busy} disabled=${!online || agreed}
+-        onClick=${() => send(() => actions.rerollVote(vote.id, true))}>${agreed ? t('已同意') : t('同意重刷')}<//>
+-        <${Button} variant="danger" disabled=${busy || !online}
+-          onClick=${() => send(() => actions.rerollVote(vote.id, false))}>${t('拒绝重刷')}<//>` : null}
+-      ${vote && host && me ? html`<${Button} disabled=${busy || !online}
+-        onClick=${() => send(() => actions.cancelReroll(vote.id))}>${t('取消投票')}<//>` : null}
+-    </div>
+-  </section>`;
++  if (!control) return null;
++  const submit = () => {
++    if (control.disabled) return;
++    return send(() => control.action === 'start' ? actions.rerollSetup(control.revision)
++      : control.action === 'cancel' ? actions.cancelReroll(control.voteId)
++      : actions.rerollVote(control.voteId, control.action === 'agree'));
++  };
++  const progress = pub.rerollVote?.voters.map((id) => {
++    const player = pub.players.find((p) => p.playerId === id);
++    return `${player?.name || id} · ${t(pub.rerollVote.agreed.includes(id) ? '已同意' : '待同意')}`;
++  }).join('\n');
++  const title = [t(control.title), progress].filter(Boolean).join('\n');
++  return html`<span class="brief-reroll brief-reroll--compact" role="group" aria-label=${t('重启投票')} aria-live="polite">
++    <${Button} variant="secondary" size="lg" class="brief-restart" icon="refresh" active=${control.selected}
++      loading=${busy} disabled=${control.disabled} title=${title} onClick=${submit}>
++      ${t(control.label, control.params)}<//>
++    ${control.canReject ? html`<${Button} variant="secondary" size="lg" class="brief-reroll-reject" icon="close" square
++      disabled=${busy || !online} title=${t('拒绝重刷')} aria-label=${t('拒绝重刷')}
++      onClick=${() => send(() => actions.rerollVote(control.voteId, false))} />` : null}
++  </span>`;
+ }
+diff --git a/test/ui/followup-023.e2e.test.js b/test/ui/followup-023.e2e.test.js
+index 457cf7951eaa50cb89c65bed02b79c13e660e39c..7e30d46130a400016663c0073c26e4a24915550e 100644
+--- a/test/ui/followup-023.e2e.test.js
++++ b/test/ui/followup-023.e2e.test.js
+@@ -125,10 +125,10 @@
+       await host.waitForSelector('.brief-reroll button');
+       await host.bringToFront();
+       await host.click('.brief-reroll button');
+-      await guest.waitForSelector('.brief-reroll .btn--primary');
++      await guest.waitForSelector('.brief-reroll .brief-restart:not(:disabled)');
+       assert.equal(await guest.evaluate(() => globalThis.__SP__.store.get().match.public.deadline), 0);
+       await guest.bringToFront();
+-      await guest.click('.brief-reroll .btn--primary');
++      await guest.click('.brief-reroll .brief-restart:not(:disabled)');
+       for (const p of [host, guest]) await p.waitForFunction(() => globalThis.__SP__.store.get().match.public?.setupRevision === 1);
+       const state = await guest.evaluate(() => globalThis.__SP__.store.get().match.public);
+       assert.equal(state.rerollVote, null);
+@@ -138,9 +138,9 @@
+       await new Promise((resolve) => setTimeout(resolve, 350));
+       await host.bringToFront();
+       await host.click('.brief-reroll button');
+-      await guest.waitForSelector('.brief-reroll .btn--danger');
++      await guest.waitForSelector('.brief-reroll .brief-reroll-reject');
+       await guest.bringToFront();
+-      await guest.click('.brief-reroll .btn--danger');
++      await guest.click('.brief-reroll .brief-reroll-reject');
+       await host.waitForFunction(() => !globalThis.__SP__.store.get().match.public.rerollVote);
+       assert.equal(await host.evaluate(() => globalThis.__SP__.store.get().match.public.setupRevision), 1);
+     } finally { await ctx.close(); }

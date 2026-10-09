@@ -1,16 +1,18 @@
 diff --git a/public/index.html b/public/index.html
-index 2fd445ccedcf7d7c3936c657af160c2a10e79f29..d5991efafa26fda73d513f8def16bd927a7fb639 100644
+index 0e44c46fc34b0de63ea6e6e97d7d9b3455972bdd..3e07c2053ed51e210b000932c95077657639e728 100644
 --- a/public/index.html
 +++ b/public/index.html
-@@ -67,9 +67,9 @@
+@@ -72,10 +72,10 @@
  
    <div class="rotate-hint" role="alert">
      <div class="rotate-hint__phone"></div>
 -    <div class="rotate-hint__title">请将设备横屏</div>
 -    <div>卫戍协议：盟约 需要横屏显示以获得完整体验</div>
+-    <button type="button" hidden class="btn btn--secondary btn--sm rotate-hint__pwa" id="rotate-hint-pwa">添加到桌面</button>
 -    <div class="rotate-hint__micro">ROTATE DEVICE</div>
 +    <div class="rotate-hint__title">기기를 가로로 돌려주세요</div>
 +    <div style="word-break:keep-all">게임을 원활하게 플레이하려면 가로 화면이 필요합니다.</div>
++    <button type="button" hidden class="btn btn--secondary btn--sm rotate-hint__pwa" id="rotate-hint-pwa">홈 화면에 추가</button>
 +    <div class="rotate-hint__micro">화면 회전 안내</div>
    </div>
  

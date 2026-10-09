@@ -1,21 +1,21 @@
 diff --git a/public/i18n/en.json b/public/i18n/en.json
-index 84cae296b39eb5615d74923ad4c975ee625ec93b..63da065d31f64f82a07a3ec9e3229ac905d16b9c 100644
+index 23b3b7b661599369cab203cbd41e50037753b827..5165bf4708941b0f7868025db406f71a68679c52 100644
 --- a/public/i18n/en.json
 +++ b/public/i18n/en.json
-@@ -1238,5 +1238,7 @@
-   "表情与阵营": "Emotes and factions",
+@@ -1262,5 +1262,7 @@
    "选择阵营": "Choose a faction",
-   "表情功能稍后提供": "Emotes will be added later",
--  "关闭聊天后，消息将在10秒后隐藏": "Messages fade 10 seconds after closing chat"
-+  "关闭聊天后，消息将在10秒后隐藏": "Messages fade 10 seconds after closing chat",
+   "请选择有效阵营": "Choose a valid faction",
+   "关闭聊天后，消息将在10秒后隐藏": "Messages fade 10 seconds after closing chat",
+-  "表情与阵营": "Emotes and factions"
++  "表情与阵营": "Emotes and factions",
 +  "干员配音语言": "Operator voice language",
 +  "所选语言没有该干员的语音时保持静音。": "Operators without voices in the selected language remain silent."
  }
 diff --git a/public/js/audio.js b/public/js/audio.js
-index 9bcbe1767e007ef67b36f6e48444baa0b7ed7dba..56e56535b1201e7762fb3bfc83cc12fe1d9867fd 100644
+index 99f6f30bfce4fda3aa8fd7df55d8464a942ec92d..e89f97100da24a9d154e130878e9b34a1c4b70db 100644
 --- a/public/js/audio.js
 +++ b/public/js/audio.js
-@@ -309,6 +309,10 @@ export const VOICE_TAP_SLOTS = Object.freeze(['select']);
+@@ -320,6 +320,10 @@ export const VOICE_TAP_SLOTS = Object.freeze(['select']);
  export function voiceLine(audio, charId, slot, lang = 'cn', random = Math.random) {
    const lines = (line) => (Array.isArray(line) ? line : [line]).filter((u) => typeof u === 'string' && u);
    const draw = (list) => (list.length ? list[Math.min(list.length - 1, Math.floor(random() * list.length))] : null);
@@ -26,7 +26,7 @@ index 9bcbe1767e007ef67b36f6e48444baa0b7ed7dba..56e56535b1201e7762fb3bfc83cc12fe
    const cn = lines(audio?.voice?.[charId]?.[slot]);
    const jp = lang === 'jp' ? draw(lines(audio?.voiceJp?.[charId]?.[slot])) : null;
    if (jp) {
-@@ -656,12 +660,16 @@ export class AudioManager {
+@@ -669,13 +673,21 @@ export class AudioManager {
    }
  
    /**
@@ -36,25 +36,31 @@ index 9bcbe1767e007ef67b36f6e48444baa0b7ed7dba..56e56535b1201e7762fb3bfc83cc12fe
 +   * Legacy manifests retain the original CN/JP lookup.
     * @param {string} lang
     */
-   setVoiceLang(lang) {
+   setVoiceLang(lang, overrides = this.voiceOverrides) {
 -    this.voiceLang = lang === 'jp' ? 'jp' : 'cn';
+-    this.voiceOverrides = sanitizeVoiceOverrides(overrides);
 +    const next = lang === 'jp' || lang === 'kr' ? lang : 'cn';
-+    if (next === this.voiceLang) return;
++    const sanitized = sanitizeVoiceOverrides(overrides);
++    const previous = this.voiceOverrides;
++    const keys = Object.keys(sanitized);
++    if (next === this.voiceLang && keys.length === Object.keys(previous).length
++      && keys.every((id) => sanitized[id] === previous[id])) return;
 +    this._stopVoice();
 +    this.voiceGate.reset();
 +    this.voiceLang = next;
++    this.voiceOverrides = sanitized;
    }
  
    _applyVolumes() {
 diff --git a/public/js/ui/gameLogic/settings.js b/public/js/ui/gameLogic/settings.js
-index 4bc49ea97319baa9d7e645c65e1625695f55e305..b81e23cf21ba7bec36acb0fb86f25a8fe5f53d6d 100644
+index 2ca280904bee06eb8133da9770869a05ec6ed007..ea8363d8a128d14e1907672f0c37e2d123407388 100644
 --- a/public/js/ui/gameLogic/settings.js
 +++ b/public/js/ui/gameLogic/settings.js
-@@ -2,24 +2,22 @@
+@@ -5,16 +5,11 @@ export { VOICE_LANGS } from '../../voicePrefs.js';
  
  import { clamp, isObj } from './shared.js';
  import { DEFAULT_HOTKEYS, sanitizeHotkeys } from './shortcuts.js';
-+import { DEFAULT_VOICE_LANGUAGE, VOICE_LANGUAGES } from '../../../../shared/voiceLanguages.js';
++import { DEFAULT_VOICE_LANGUAGE } from '../../../../shared/voiceLanguages.js';
  
  
  // ---- settings ------------------------------------------------------------------------------------------------------
@@ -63,39 +69,68 @@ index 4bc49ea97319baa9d7e645c65e1625695f55e305..b81e23cf21ba7bec36acb0fb86f25a8f
 - * The operator voice dubs (settings 语音语言): 'cn' 中文 (`audio.voice`, the default) and 'jp' 日本語 (`audio.voiceJp`,
 - * falling back to the Chinese line it lacks — public/js/audio.js voiceLine). Not tied to the interface language.
 - */
--export const VOICE_LANGS = Object.freeze(['cn', 'jp']);
-+/** The installed KR/JP voice packs, independent of interface language. */
-+export const VOICE_LANGS = Object.freeze(VOICE_LANGUAGES.map(({ id }) => id));
+-
+-
+ /**
+  * The steps of 设置 →「文字大小」 (textSize): the interface text root `--t` of css/theme.css — 'sm' is the design's own
+  * sizes (`--t: 1rem`), the others lift the phone's 40 px root by a floor and grow the desktop gently. Text only: the
+@@ -24,13 +19,13 @@ export const TEXT_SIZES = Object.freeze(['sm', 'md', 'lg', 'xl']);
  
- /** keys: the in-match shortcuts' key map (ui/gameLogic/shortcuts.js; settings → 快捷键). voiceLang: VOICE_LANGS. */
--export const DEFAULT_SETTINGS = Object.freeze({ bgm: 0.6, sfx: 0.8, voice: 0.8, voiceLang: 'cn', muted: false, damageNumbers: true, quality: 'high', keys: DEFAULT_HOTKEYS });
-+export const DEFAULT_SETTINGS = Object.freeze({ bgm: 0.6, sfx: 0.8, voice: 0.8, voiceLang: DEFAULT_VOICE_LANGUAGE, muted: false, damageNumbers: true, quality: 'high', keys: DEFAULT_HOTKEYS });
+ /** keys: the in-match shortcuts' key map (ui/gameLogic/shortcuts.js; settings → 快捷键). voiceLang: VOICE_LANGS.
+  *  textSize: TEXT_SIZES (css/theme.css `--t`, applied by ui/settings.js applyTextSize). */
+-export const DEFAULT_SETTINGS = Object.freeze({ bgm: 0.6, sfx: 0.8, voice: 0.8, voiceLang: 'cn', voiceOverrides: Object.freeze({}), muted: false, damageNumbers: true, quality: 'high', textSize: 'sm', keys: DEFAULT_HOTKEYS });
++export const DEFAULT_SETTINGS = Object.freeze({ bgm: 0.6, sfx: 0.8, voice: 0.8, voiceLang: DEFAULT_VOICE_LANGUAGE, voiceOverrides: Object.freeze({}), muted: false, damageNumbers: true, quality: 'high', textSize: 'sm', keys: DEFAULT_HOTKEYS });
  const QUALITIES = ['high', 'medium', 'low'];
  
  /**
   * Sanitize persisted settings.
   * @param {any} raw
-- * @returns {{ bgm: number, sfx: number, voice: number, voiceLang: 'cn'|'jp', muted: boolean, damageNumbers: boolean, quality: 'high'|'medium'|'low',
-+ * @returns {{ bgm: number, sfx: number, voice: number, voiceLang: 'kr'|'jp', muted: boolean, damageNumbers: boolean, quality: 'high'|'medium'|'low',
-  *   keys: Record<'refresh'|'freeze'|'levelUp'|'retreat'|'sell'|'ready', string> }}
+- * @returns {{ bgm: number, sfx: number, voice: number, voiceLang: 'cn'|'jp', voiceOverrides: Record<string, string>, muted: boolean, damageNumbers: boolean, quality: 'high'|'medium'|'low',
++ * @returns {{ bgm: number, sfx: number, voice: number, voiceLang: 'kr'|'jp', voiceOverrides: Record<string, string>, muted: boolean, damageNumbers: boolean, quality: 'high'|'medium'|'low',
+  *   textSize: 'sm'|'md'|'lg'|'xl', keys: Record<'refresh'|'freeze'|'levelUp'|'retreat'|'sell'|'ready', string> }}
   */
  export function sanitizeSettings(raw) {
+diff --git a/public/js/ui/operatorVoice.js b/public/js/ui/operatorVoice.js
+index 0d77e34f245aa428425a99fe932002f1d983c461..6a8e7c6fe2f3ee929e2da81afb4072de41392962 100644
+--- a/public/js/ui/operatorVoice.js
++++ b/public/js/ui/operatorVoice.js
+@@ -2,8 +2,7 @@
+ import { html } from './components.js';
+ import { useSettings, updateSettings } from './settings.js';
+ import { t } from '../../../shared/i18n.js';
+-
+-const VOICE_LANG_NAMES = { cn: '中文', jp: '日本語' }; // i18n-ignore
++import { VOICE_LANGUAGES } from '../../../shared/voiceLanguages.js';
+ 
+ export function OperatorVoice({ charId }) {
+   const settings = useSettings();
+@@ -18,8 +17,8 @@ export function OperatorVoice({ charId }) {
+   return html`<label class="lo-voice" data-voice-char=${charId}>
+     <span>${t('此干员语音')}</span>
+     <span class="lo-select"><select aria-label=${t('此干员语音')} value=${value} onChange=${(e) => change(e.currentTarget.value)}>
+-      <option value="">${t('跟随全局')}</option><option value="cn">${VOICE_LANG_NAMES.cn}</option><option value="jp">${VOICE_LANG_NAMES.jp}</option>
++      <option value="">${t('跟随全局')}</option>${VOICE_LANGUAGES.map(({ id, label }) => html`<option key=${id} value=${id}>${label}</option>`)}
+     </select></span>
+-    <small>${t('仅保存在此浏览器，缺失的日语语音会回退到中文。')}</small>
++    <small>${t('所选语言没有该干员的语音时保持静音。')}</small>
+   </label>`;
+ }
 diff --git a/public/js/ui/settings.js b/public/js/ui/settings.js
-index b83fdcfae926a4beb4d605733283152ce121d380..cd14b3536ac49490a9f9408190ecdac76b72055b 100644
+index 56c18b38bdb24cc430289f356a33a4f99d40048c..7eacf684332b74a608541805cec0a33b840e84da 100644
 --- a/public/js/ui/settings.js
 +++ b/public/js/ui/settings.js
-@@ -12,8 +12,9 @@ import { useLayoutEffect, useRef, useState } from '../../vendor/hooks.module.js'
+@@ -18,8 +18,9 @@ import { useLayoutEffect, useRef, useState } from '../../vendor/hooks.module.js'
  import { html, Modal, Button, Icon, MicroLabel } from './components.js';
  import { GIcon } from './gameComponents.js';
  import { createStore, useStore, loadPref, savePref, store } from '../store.js';
--import { sanitizeSettings, HOTKEY_ACTIONS, DEFAULT_HOTKEYS, hotkeyLabel, rebindHotkey, isDefaultHotkeys, captureHotkey, VOICE_LANGS } from './gameLogic.js';
-+import { sanitizeSettings, HOTKEY_ACTIONS, DEFAULT_HOTKEYS, hotkeyLabel, rebindHotkey, isDefaultHotkeys, captureHotkey } from './gameLogic.js';
+-import { sanitizeSettings, HOTKEY_ACTIONS, DEFAULT_HOTKEYS, hotkeyLabel, rebindHotkey, isDefaultHotkeys, captureHotkey, VOICE_LANGS, TEXT_SIZES } from './gameLogic.js';
++import { sanitizeSettings, HOTKEY_ACTIONS, DEFAULT_HOTKEYS, hotkeyLabel, rebindHotkey, isDefaultHotkeys, captureHotkey, TEXT_SIZES } from './gameLogic.js';
  import { audio } from '../audio.js';
 +import { VoiceLanguageSetting } from './voiceLanguage.js';
  import { openGuide } from './guide.js';
  import { openAssetPrefetchControls } from '../assetPrefetch.js';
  import { detectFeatures } from './device.js';
-@@ -21,11 +22,12 @@ import { LangToggle, machineTranslationNote } from './lang.js';
+@@ -27,11 +28,12 @@ import { LangToggle, machineTranslationNote } from './lang.js';
  import { t, tc, N_ } from '../../../shared/i18n.js';
  import { errorCount, currentBattle, diagnosticsText } from '../diag.js';
  import { copyText } from './clipboard.js';
@@ -103,16 +138,16 @@ index b83fdcfae926a4beb4d605733283152ce121d380..cd14b3536ac49490a9f9408190ecdac7
  
  const cx = (...p) => p.flat().filter(Boolean).join(' ');
  
- /** Settings store: { bgm, sfx, voice, voiceLang, muted, damageNumbers, quality, keys }. */
+ /** Settings store: { bgm, sfx, voice, voiceLang, voiceOverrides, muted, damageNumbers, quality, textSize, keys }. */
 -export const settingsStore = createStore(sanitizeSettings(loadPref('settings', null)));
 +export const settingsStore = createStore(sanitizeSettings(migrateVoiceSettings(loadPref('settings', null), loadPref('voiceLanguage', null))));
  
- settingsStore.subscribe((s) => {
-   savePref('settings', sanitizeSettings(s));
-@@ -69,11 +71,6 @@ function Toggle({ label, micro, value, onChange }) {
- }
- 
- const QUALITY = [['high', N_('高')], ['medium', N_('中')], ['low', N_('低')]];
+ /**
+  * 设置 →「文字大小」: put the step on <html data-text> — css/theme.css turns it into the text root `--t`
+@@ -95,11 +97,6 @@ const QUALITY = [['high', N_('高')], ['medium', N_('中')], ['low', N_('低')]]
+  * raise the text root `--t` (css/theme.css) and with it every readable font-size; the board and the HUD's boxes stay.
+  */
+ const TEXT_SCALES = [['sm', N_('小')], ['md', N_('中')], ['lg', N_('大')], ['xl', N_('特大')]];
 -/**
 - * 语音语言: each dub named in its own language, like the interface language switch (ui/lang.js) — the owner's
 - * 「中文 / 日本語」 (2026-10-08); VOICE_LANGS order.
@@ -121,7 +156,7 @@ index b83fdcfae926a4beb4d605733283152ce121d380..cd14b3536ac49490a9f9408190ecdac7
  /** The rebindable shortcuts' names (msgids), by action. */
  const HOTKEY_NAMES = { refresh: N_('刷新商店'), freeze: N_('冻结 / 解冻商店'), levelUp: N_('升级调度中心'), retreat: N_('撤退选中干员'),
    sell: N_('出售选中干员'), ready: N_('准备就绪 / 暂停（独立模拟）') };
-@@ -231,13 +228,7 @@ export function SettingsModal({ open, onClose }) {
+@@ -257,13 +254,7 @@ export function SettingsModal({ open, onClose }) {
        </div>
        <${Slider} label=${t('背景音乐')} micro="BGM" icon="play" value=${s.bgm} onInput=${(v) => updateSettings({ bgm: v })} />
        <${Slider} label=${t('干员语音')} micro="VOICE" icon="mic" value=${s.voice} onInput=${(v) => updateSettings({ voice: v })} />
@@ -134,54 +169,29 @@ index b83fdcfae926a4beb4d605733283152ce121d380..cd14b3536ac49490a9f9408190ecdac7
 -      </div>
 +      <${VoiceLanguageSetting} lang=${s.voiceLang} onChange=${(lang) => updateSettings({ voiceLang: lang })} />
        <${Slider} label=${t('音效')} micro="SFX" icon="signal" value=${s.sfx}
-         onInput=${(v) => { updateSettings({ sfx: v }); if (!tested) { setTested(true); setTimeout(() => setTested(false), 400); audio.sfx('click'); } }} />
+                  onInput=${(v) => { updateSettings({ sfx: v }); if (!tested) { setTested(true); setTimeout(() => setTested(false), 400); audio.sfx('click'); } }} />
        <${Toggle} label=${t('静音')} micro="MUTE" value=${s.muted} onChange=${(v) => updateSettings({ muted: v })} />
-diff --git a/test/ui/audio.test.js b/test/ui/audio.test.js
-index 896876a13c77de560de9e1107ad7f5a54e24de77..1982f3a8d3cde67fd4aec478aa6889265eb0c1fb 100644
---- a/test/ui/audio.test.js
-+++ b/test/ui/audio.test.js
-@@ -364,11 +364,12 @@ describe('operator battle voice', () => {
-       assert.match(a.voiceNode?.url ?? '', /^\/a\/voice\/cn\/char_a\/cn_02[12]\.mp3$/, '中文 again');
-       a._stopVoice();
-       a.setVoiceLang('kr');
--      assert.equal(a.voiceLang, 'cn', 'no other dub: anything but jp is 中文');
-+      assert.equal(a.voiceLang, 'kr', 'the patch controller also accepts the installed KR dub');
-       // the settings store hands the choice over (installAudio and ui/settings.js)
-       const settings = readFileSync(path.join(ROOT, 'public/js/ui/settings.js'), 'utf8');
-       assert.match(settings, /audio\.setVoiceLang\(s\.voiceLang\)/);
--      assert.match(settings, /t\('语音语言'\)/);
-+      const voiceSetting = readFileSync(path.join(ROOT, 'public/js/ui/voiceLanguage.js'), 'utf8');
-+      assert.match(voiceSetting, /t\('干员配音语言'\)/);
-     } finally {
-       globalThis.fetch = origFetch;
-     }
-diff --git a/test/ui/gameLogic.test.js b/test/ui/gameLogic.test.js
-index 0732417b28142d9ace99d15cab8fbb3927b7306b..48d4a901daab1634cb25df411bb2fc8c4856c470 100644
---- a/test/ui/gameLogic.test.js
-+++ b/test/ui/gameLogic.test.js
-@@ -723,14 +723,15 @@ describe('keyboard & settings', () => {
-   test('sanitizeSettings', () => {
-     assert.deepEqual(sanitizeSettings(null), { ...DEFAULT_SETTINGS });
-     assert.deepEqual(sanitizeSettings({ bgm: 3, sfx: -1, voice: 2, muted: 'yes', damageNumbers: false, quality: 'ultra' }),
--      { bgm: 1, sfx: 0, voice: 1, voiceLang: 'cn', muted: false, damageNumbers: false, quality: 'high', keys: { ...DEFAULT_SETTINGS.keys } },
-+      { bgm: 1, sfx: 0, voice: 1, voiceLang: 'kr', muted: false, damageNumbers: false, quality: 'high', keys: { ...DEFAULT_SETTINGS.keys } },
-       'a saved profile without `keys` (before 0.2.0) gets the default key map (test/ui/feedback5-hotkeys.test.js)');
-     assert.equal(sanitizeSettings({ bgm: 0.5 }).voice, DEFAULT_SETTINGS.voice, 'a saved profile without `voice` gets the default');
--    // 语音语言 (0.2.2): 中文 by default — a profile saved before it, or any other value, plays the Chinese dub
--    assert.equal(DEFAULT_SETTINGS.voiceLang, 'cn');
--    assert.equal(sanitizeSettings({ bgm: 0.5 }).voiceLang, 'cn');
-+    // The patch service defaults to KR and supports JP through the upstream setting.
-+    assert.equal(DEFAULT_SETTINGS.voiceLang, 'kr');
-+    assert.equal(sanitizeSettings({ bgm: 0.5 }).voiceLang, 'kr');
-     assert.equal(sanitizeSettings({ voiceLang: 'jp' }).voiceLang, 'jp');
--    for (const bad of ['en', 'kr', 'JP', 'ja', 1, null]) assert.equal(sanitizeSettings({ voiceLang: bad }).voiceLang, 'cn', String(bad));
-+    assert.equal(sanitizeSettings({ voiceLang: 'kr' }).voiceLang, 'kr');
-+    for (const bad of ['en', 'cn', 'JP', 'ja', 1, null]) assert.equal(sanitizeSettings({ voiceLang: bad }).voiceLang, 'kr', String(bad));
-     assert.equal(sanitizeSettings({ bgm: 0.333 }).bgm, 0.33);
-     assert.equal(sanitizeSettings({ quality: 'low' }).quality, 'low');
-   });
+diff --git a/public/js/voicePrefs.js b/public/js/voicePrefs.js
+index 186dc6f3e98798617685efceb1fa55b8ac5906e7..d67a36dc3412b0d17a57a15a4e6a4710f9aa76e4 100644
+--- a/public/js/voicePrefs.js
++++ b/public/js/voicePrefs.js
+@@ -1,5 +1,6 @@
+ // Browser-local dub preferences. Every variant of an operator shares its charId; absent entries follow the global dub.
+-export const VOICE_LANGS = Object.freeze(['cn', 'jp']);
++import { VOICE_LANGUAGES } from '../../shared/voiceLanguages.js';
++export const VOICE_LANGS = Object.freeze(VOICE_LANGUAGES.map(({ id }) => id));
+ export function sanitizeVoiceOverrides(raw) {
+   const out = {};
+   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+@@ -10,5 +11,5 @@ export function sanitizeVoiceOverrides(raw) {
+ }
+ export function voiceLangFor(charId, globalLang, overrides) {
+   const own = Object.hasOwn(overrides || {}, charId) ? overrides[charId] : null;
+-  return VOICE_LANGS.includes(own) ? own : globalLang === 'jp' ? 'jp' : 'cn';
++  return VOICE_LANGS.includes(own) ? own : VOICE_LANGS.includes(globalLang) ? globalLang : 'cn';
+ }
 diff --git a/test/feedback7-voices.test.js b/test/feedback7-voices.test.js
-index 8b8fbac9b41a885b222a94ef491db7dba67571d8..b5a382129ca13ceadcf3fad0a4c69e36325eef81 100644
+index ded52f35e7891a76a0c822615c2329309fe86b26..2571915fec05e02e9e13fba5841a214751453a0f 100644
 --- a/test/feedback7-voices.test.js
 +++ b/test/feedback7-voices.test.js
 @@ -18,6 +18,7 @@ import { indexAudio, VOICE_DIRS } from '../tools/assets/audio.mjs';
@@ -215,3 +225,66 @@ index 8b8fbac9b41a885b222a94ef491db7dba67571d8..b5a382129ca13ceadcf3fad0a4c69e36
    for (const code of ['en', 'ja', 'ko', 'zh-TW']) {
      const pack = readJson(`public/i18n/${code}.json`);
      assert.ok(typeof pack['语音语言'] === 'string' && pack['语音语言'] && pack['语音语言'] !== '语音语言', `${code}: 语音语言`);
+diff --git a/test/ui/audio.test.js b/test/ui/audio.test.js
+index 6e6a58953ad0675b7db4214946173a35a7424276..c4810f16c1d93103da7f85bbb11b875e0a10cef1 100644
+--- a/test/ui/audio.test.js
++++ b/test/ui/audio.test.js
+@@ -364,11 +364,12 @@ describe('operator battle voice', () => {
+       assert.match(a.voiceNode?.url ?? '', /^\/a\/voice\/cn\/char_a\/cn_02[12]\.mp3$/, '中文 again');
+       a._stopVoice();
+       a.setVoiceLang('kr');
+-      assert.equal(a.voiceLang, 'cn', 'no other dub: anything but jp is 中文');
++      assert.equal(a.voiceLang, 'kr', 'the patch controller also accepts the installed KR dub');
+       // the settings store hands the choice over (installAudio and ui/settings.js)
+       const settings = readFileSync(path.join(ROOT, 'public/js/ui/settings.js'), 'utf8');
+       assert.match(settings, /audio\.setVoiceLang\(s\.voiceLang, s\.voiceOverrides\)/);
+-      assert.match(settings, /t\('语音语言'\)/);
++      const voiceSetting = readFileSync(path.join(ROOT, 'public/js/ui/voiceLanguage.js'), 'utf8');
++      assert.match(voiceSetting, /t\('干员配音语言'\)/);
+     } finally {
+       globalThis.fetch = origFetch;
+     }
+diff --git a/test/ui/gameLogic.test.js b/test/ui/gameLogic.test.js
+index b9cbbcc5de70c57d810d253b258ebb3ba7bbf6ad..5a6e438a9abe67b8bab2c883ce11add04ff6fa6e 100644
+--- a/test/ui/gameLogic.test.js
++++ b/test/ui/gameLogic.test.js
+@@ -723,14 +723,15 @@ describe('keyboard & settings', () => {
+   test('sanitizeSettings', () => {
+     assert.deepEqual(sanitizeSettings(null), { ...DEFAULT_SETTINGS });
+     assert.deepEqual(sanitizeSettings({ bgm: 3, sfx: -1, voice: 2, muted: 'yes', damageNumbers: false, quality: 'ultra' }),
+-      { bgm: 1, sfx: 0, voice: 1, voiceLang: 'cn', voiceOverrides: {}, muted: false, damageNumbers: false, quality: 'high', textSize: 'sm', keys: { ...DEFAULT_SETTINGS.keys } },
++      { bgm: 1, sfx: 0, voice: 1, voiceLang: 'kr', voiceOverrides: {}, muted: false, damageNumbers: false, quality: 'high', textSize: 'sm', keys: { ...DEFAULT_SETTINGS.keys } },
+       'a saved profile without `keys` (before 0.2.0) gets the default key map (test/ui/feedback5-hotkeys.test.js)');
+     assert.equal(sanitizeSettings({ bgm: 0.5 }).voice, DEFAULT_SETTINGS.voice, 'a saved profile without `voice` gets the default');
+-    // 语音语言 (0.2.2): 中文 by default — a profile saved before it, or any other value, plays the Chinese dub
+-    assert.equal(DEFAULT_SETTINGS.voiceLang, 'cn');
+-    assert.equal(sanitizeSettings({ bgm: 0.5 }).voiceLang, 'cn');
++    // The patch service defaults to KR and supports JP through the upstream setting.
++    assert.equal(DEFAULT_SETTINGS.voiceLang, 'kr');
++    assert.equal(sanitizeSettings({ bgm: 0.5 }).voiceLang, 'kr');
+     assert.equal(sanitizeSettings({ voiceLang: 'jp' }).voiceLang, 'jp');
+-    for (const bad of ['en', 'kr', 'JP', 'ja', 1, null]) assert.equal(sanitizeSettings({ voiceLang: bad }).voiceLang, 'cn', String(bad));
++    assert.equal(sanitizeSettings({ voiceLang: 'kr' }).voiceLang, 'kr');
++    for (const bad of ['en', 'cn', 'JP', 'ja', 1, null]) assert.equal(sanitizeSettings({ voiceLang: bad }).voiceLang, 'kr', String(bad));
+     assert.equal(sanitizeSettings({ bgm: 0.333 }).bgm, 0.33);
+     assert.equal(sanitizeSettings({ quality: 'low' }).quality, 'low');
+   });
+diff --git a/test/ui/voice-prefs-023.test.js b/test/ui/voice-prefs-023.test.js
+index a094c902b0e25e900831b352b8553876d508c964..a271f62ab8ad858cbfa7a4f1d83f9e897724754c 100644
+--- a/test/ui/voice-prefs-023.test.js
++++ b/test/ui/voice-prefs-023.test.js
+@@ -10,12 +10,12 @@ test('old settings migrate to inherit, malformed or prototype entries are discar
+   for (const raw of [null, [], 1, 'jp']) assert.deepEqual(sanitizeVoiceOverrides(raw), {});
+ });
+ test('per-character override survives persistence; deletion restores the current global setting', () => {
+-  const settings = sanitizeSettings(JSON.parse(JSON.stringify({ voiceLang: 'cn', voiceOverrides: { [a]: 'jp', [b]: 'cn' } })));
++  const settings = sanitizeSettings(JSON.parse(JSON.stringify({ voiceLang: 'kr', voiceOverrides: { [a]: 'jp', [b]: 'kr' } })));
+   const manager = new AudioManager();
+   manager.setVoiceLang(settings.voiceLang, settings.voiceOverrides);
+   assert.equal(voiceLangFor(a, manager.voiceLang, manager.voiceOverrides), 'jp');
+   manager.setVoiceLang('jp');
+-  assert.equal(voiceLangFor(b, manager.voiceLang, manager.voiceOverrides), 'cn');
++  assert.equal(voiceLangFor(b, manager.voiceLang, manager.voiceOverrides), 'kr');
+   delete settings.voiceOverrides[b];
+   manager.setVoiceLang('jp', settings.voiceOverrides);
+   assert.equal(voiceLangFor(b, manager.voiceLang, manager.voiceOverrides), 'jp');

@@ -1,0 +1,67 @@
+diff --git a/public/i18n/en.json b/public/i18n/en.json
+index 5165bf4708941b0f7868025db406f71a68679c52..b7dcdf2f3c14648e08ddb9dfe708afdab62739bd 100644
+--- a/public/i18n/en.json
++++ b/public/i18n/en.json
+@@ -1264,5 +1264,7 @@
+   "关闭聊天后，消息将在10秒后隐藏": "Messages fade 10 seconds after closing chat",
+   "表情与阵营": "Emotes and factions",
+   "干员配音语言": "Operator voice language",
+-  "所选语言没有该干员的语音时保持静音。": "Operators without voices in the selected language remain silent."
++  "所选语言没有该干员的语音时保持静音。": "Operators without voices in the selected language remain silent.",
++  "关闭聊天后，消息将在5秒后隐藏": "Messages fade 5 seconds after closing chat",
++  "{name}博士请求重新开始模拟。": "{name} requested a vote to restart the simulation."
+ }
+diff --git a/public/js/main.js b/public/js/main.js
+index 8801148d206ff7a36c08bf9fe8767ac77c02105d..197a4c3b9211b34602289cc689a2d65a7be655c1 100644
+--- a/public/js/main.js
++++ b/public/js/main.js
+@@ -47,6 +47,7 @@ import { GameScreen } from './screens/game.js';
+ import { installAudio } from './audio.js';
+ import { installTeamChat } from './chat.js';
+ import { AssetPrefetchHost } from './ui/assetPrefetch.js';
++import { SetupRerollTransitionHost } from './ui/setupRerollTransition.js';
+ import { settingsStore } from './ui/settings.js';
+ import { GuideHost } from './ui/guide.js';
+ import { installDeviceSupport } from './ui/device.js';
+@@ -308,6 +309,7 @@ function App() {
+     <${LoadoutHost} />
+     <${StatsHost} />
+     <${AssetPrefetchHost} />
++    <${SetupRerollTransitionHost} />
+   </div>`;
+ }
+ 
+diff --git a/public/js/screens/briefing.js b/public/js/screens/briefing.js
+index 7c5b08458ee46a70c1b6c2e87b4a95e084fafede..e619fe50a03213265c9f5ea8fd37828bc09fead8 100644
+--- a/public/js/screens/briefing.js
++++ b/public/js/screens/briefing.js
+@@ -18,6 +18,8 @@ import { enemyIconUrl, factionIconUrl } from '../ui/assetUrls.js';
+ import { useStore } from '../store.js';
+ import { data } from '../data.js';
+ import { t, tParts } from '../../../shared/i18n.js';
++import { TeamChat } from '../ui/teamChat.js';
++import { canTeamChat } from '../chat.js';
+ 
+ const cx = (...p) => p.flat().filter(Boolean).join(' ');
+ 
+@@ -26,10 +28,13 @@ export function BriefingScreen() {
+   const pub = useStore((s) => s.match.public);
+   const priv = useStore((s) => s.match.private);
+   const myId = useStore((s) => s.me.playerId);
++  const room = useStore((s) => s.room);
++  const online = useStore((s) => s.connection.status === 'online');
+   const solo = useStore((s) => s.room?.mode === 'solo') || String(pub?.modeId || '').includes('single');
+   const gd = useGameData();
+   const [exit, setExit] = useState(false);
+   const [busy, setBusy] = useState(false);
++  const [chatOpen, setChatOpen] = useState(false);
+   if (!pub) return null;
+ 
+   const players = sortedPlayers(pub);
+@@ -104,4 +109,6 @@ export function BriefingScreen() {
+     </footer>
+     <${ExitModal} open=${exit} onClose=${() => setExit(false)} solo=${solo} />
++    ${canTeamChat(room, myId) ? html`<div class="phase-chat phase-chat--brief"><${TeamChat} key=${room.code}
++      playerId=${myId} online=${online} open=${chatOpen} onToggle=${setChatOpen} /></div>` : null}
+   </div>`;
+ }

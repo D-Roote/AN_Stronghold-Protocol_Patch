@@ -1,5 +1,5 @@
 diff --git a/public/css/screens/draft.css b/public/css/screens/draft.css
-index 31d32cc8d3c6c0ac780c60bfdda4856ac3ede9c2..52c7c42e496c4c850a49ec9070b1546520d1467c 100644
+index 0cf5eb9bd34f000a062f6df5821e53f5a7dc4cc6..353aa2056844e427bade4bdb1b1f7a63619bb5a0 100644
 --- a/public/css/screens/draft.css
 +++ b/public/css/screens/draft.css
 @@ -132,3 +132,25 @@

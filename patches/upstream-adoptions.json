@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "ref": "v0.2.3",
+    "commit": "1db8e51023ae6abaec9370beb81a513d5c4d0b01"
+  },
+  "retainedPatches": [
+    {
+      "file": "03-005-Feat-briefing-restart-vote.patch",
+      "reason": "Use the upstream setup reroll protocol and engine. Keep this previous implementation for user review; briefing chat, chat notifications and the transition are maintained by 03-006-Feat-upstream-reroll-integration.patch."
+    }
+  ],
+  "retainedOverlays": [
+    {
+      "file": "server/restartVote.js",
+      "reason": "Replaced by the upstream setupVote.js unanimous vote engine."
+    },
+    {
+      "file": "server/match/restartBans.js",
+      "reason": "Upstream regenerates the complete opening setup rather than only the bans."
+    },
+    {
+      "file": "public/js/ui/restartVote.js",
+      "reason": "Upstream SetupReroll owns vote controls. The retained animation is connected to setupRevision by setupRerollTransition.js."
+    },
+    {
+      "file": "test/restart-vote.test.js",
+      "reason": "Tests the retained room.restartVote protocol; upstream setup-reroll tests and new chat/transition integration tests validate the active feature."
+    }
+  ],
+  "replacementFiles": [
+    "public/js/ui/setupReroll.js",
+    "server/match/match/setupVote.js",
+    "test/match/setup-reroll.test.js",
+    "test/match/setup-reroll-ws.test.js"
+  ]
+}

@@ -19,7 +19,7 @@ from pathlib import Path, PurePosixPath
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_REL = Path(".build/Stronghold-Protocol")
 # Bump when reconstruction changes generated files outside their Git contents (e.g. permissions).
-SOURCE_FORMAT_VERSION = 2
+SOURCE_FORMAT_VERSION = 4
 
 
 class ProjectError(RuntimeError):
@@ -46,14 +46,15 @@ def git(source, *args, **kwargs):
     return run(["git", "-C", source, *args], **kwargs)
 
 
-def write_json(path, data):
+def write_json(path, data, *, compact=False):
     """Atomically write public project data readable by the container's runtime user."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
-            json.dump(data, stream, ensure_ascii=False, indent=2)
+            json.dump(data, stream, ensure_ascii=False, indent=None if compact else 2,
+                      separators=(",", ":") if compact else None)
             stream.write("\n")
             stream.flush()
             # mkstemp starts at 0600; Docker COPY retains that mode but changes the owner to root.
@@ -156,6 +157,38 @@ def patch_fingerprint(root, pin):
     return digest.hexdigest()
 
 
+def apply_data_patch(document, patch):
+    """Correct only guarded localized strings, without copying upstream data into this repository."""
+    if patch.get("schemaVersion") != 1 or patch.get("type") != "data-localization" or patch.get("language") != "ko":
+        raise ProjectError("Unsupported data localization patch")
+    changes = patch.get("changes")
+    if not isinstance(changes, list) or not changes:
+        raise ProjectError("Data localization patch requires guarded changes")
+    result, conflicts, seen = copy.deepcopy(document), [], set()
+    for change in changes:
+        if not isinstance(change, dict) or set(change) != {"path", "base", "value"}:
+            raise ProjectError("Invalid data localization entry")
+        parts = change["path"]
+        if (not isinstance(parts, list) or not parts or any(not isinstance(p, str) or not p for p in parts)
+                or not isinstance(change["base"], str) or not isinstance(change["value"], str)):
+            raise ProjectError("Data localization entries must target strings")
+        key = tuple(parts)
+        if key in seen:
+            raise ProjectError("Duplicate data localization path")
+        seen.add(key)
+        target = result
+        for part in parts[:-1]:
+            target = target.get(part) if isinstance(target, dict) else None
+        if (not isinstance(target, dict) or parts[-1] not in target
+                or target[parts[-1]] not in (change["base"], change["value"])):
+            conflicts.append(".".join(parts))
+        else:
+            target[parts[-1]] = change["value"]
+    if conflicts:
+        raise ProjectError("Upstream Korean data changed; review patch guards: " + ", ".join(conflicts[:20]))
+    return result
+
+
 PATCH_GROUPS = {1: "Build", 2: "UI", 3: "Feat", 4: "Resource", 5: "Fix"}
 
 
@@ -170,14 +203,57 @@ def ordered_patches(root):
     """Apply category groups and their own sequence numbers; gaps are allowed."""
     folder = Path(root) / "patches"
     indexed = {}
-    for path in folder.glob("*.patch"):
+    candidates = list(folder.glob("*.patch")) + [p for p in folder.glob("*.json")
+                                              if re.match(r"^[0-9]{2}-[0-9]{3}-", p.name)]
+    for path in candidates:
         if path.is_symlink() or not path.is_file():
             raise ProjectError("Source patches must be regular files, not symlinks")
-        index = validate_patch_name(path.name)
+        index = validate_patch_name(path.with_suffix(".patch").name)
         if index in indexed:
             raise ProjectError(f"Duplicate patch index {index[0]:02d}-{index[1]:03d}: {indexed[index].name}, {path.name}")
         indexed[index] = path
     return [indexed[index] for index in sorted(indexed)]
+
+
+def source_selection(root, pin):
+    """Keep adopted patches on disk for review without applying their old implementations."""
+    root = Path(root)
+    patches = ordered_patches(root)
+    manifest = root / "patches/upstream-adoptions.json"
+    if not manifest.exists():
+        return patches, set(), []
+    try:
+        adopted = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise ProjectError("Upstream adoption manifest is invalid") from None
+    if adopted.get("schemaVersion") != 1:
+        raise ProjectError("Unsupported upstream adoption schema")
+    if adopted.get("upstream") != {"ref": pin["ref"], "commit": pin["commit"]}:
+        raise ProjectError("Review retained patches and upstream adoptions for this release before preparing")
+    excluded = {}
+    for section, folder in [("retainedPatches", "patches"), ("retainedOverlays", "overlays")]:
+        entries = adopted.get(section, [])
+        if not isinstance(entries, list):
+            raise ProjectError(f"Invalid adoption section: {section}")
+        paths = set()
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get("reason"), str) or not entry["reason"].strip():
+                raise ProjectError("Retained sources require a review reason")
+            relative = safe_relative(entry.get("file"))
+            value = relative.as_posix()
+            path = root / folder / value
+            if path.is_symlink() or not path.is_file() or value in paths:
+                raise ProjectError(f"Missing or duplicate retained source: {folder}/{value}")
+            if folder == "patches" and path not in patches:
+                raise ProjectError("Retained patch must be an indexed source patch")
+            paths.add(value)
+        excluded[folder] = paths
+    replacements = adopted.get("replacementFiles", [])
+    if not isinstance(replacements, list) or not replacements:
+        raise ProjectError("Upstream adoptions require replacement source files")
+    replacements = [safe_relative(value).as_posix() for value in replacements]
+    return ([p for p in patches if p.name not in excluded["patches"]],
+            excluded["overlays"], replacements)
 
 
 def ensure_upstream(root, pin):
@@ -220,7 +296,7 @@ def ensure_upstream(root, pin):
 def reconstruct(root, pin, cache, destination):
     """Build into a disposable checkout; failed patches cannot modify the usable source."""
     root, cache, destination = Path(root), Path(cache), Path(destination)
-    patches = ordered_patches(root)
+    patches, retained_overlays, replacements = source_selection(root, pin)
     run(["git", "clone", "--no-hardlinks", "--no-checkout", "--", cache, destination])
     git(destination, "config", "core.autocrlf", "false")
     git(destination, "checkout", "--detach", pin["commit"])
@@ -228,6 +304,9 @@ def reconstruct(root, pin, cache, destination):
     version = json.loads((destination / "package.json").read_text())["version"]
     if version != pin["version"]:
         raise ProjectError("Upstream package version differs from the lock")
+    for relative in replacements:
+        if not (destination / relative).is_file():
+            raise ProjectError(f"Adopted upstream replacement is missing: {relative}")
     translation_patches = [root / "patches/ko-ui.json"]
     feature_translations = root / "patches/ko-features.json"
     if feature_translations.exists():
@@ -244,14 +323,25 @@ def reconstruct(root, pin, cache, destination):
         if not source.is_file():
             continue
         relative = safe_relative(source.relative_to(root / "overlays").as_posix())
+        if relative.as_posix() in retained_overlays:
+            continue
         target = destination.joinpath(*relative.parts)
         if target.exists():
             raise ProjectError(f"New overlay collides with upstream: {relative}")
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
     for patch in patches:
-        git(destination, "apply", "--check", str(patch.resolve()))
-        git(destination, "apply", str(patch.resolve()))
+        if patch.suffix == ".json":
+            layer = json.loads(patch.read_text(encoding="utf-8"))
+            relative = safe_relative(layer.get("file"))
+            if relative.parts[:2] != ("data", "i18n") or relative.name != "ko.json":
+                raise ProjectError("Data localization patches must target data/i18n/ko.json")
+            target = destination.joinpath(*relative.parts)
+            document = json.loads(target.read_text(encoding="utf-8"))
+            write_json(target, apply_data_patch(document, layer), compact=True)
+        else:
+            git(destination, "apply", "--check", str(patch.resolve()))
+            git(destination, "apply", str(patch.resolve()))
     exclude = destination / ".git/info/exclude"
     with exclude.open("a", encoding="utf-8") as stream:
         stream.write("\n/.stronghold-build.json\n")
@@ -263,6 +353,9 @@ def reconstruct(root, pin, cache, destination):
         f"Apply Korean patch layer to {pin['ref']}", env=environment)
     return {"schemaVersion": 1, "upstream": pin,
             "fingerprint": patch_fingerprint(root, pin),
+            "appliedPatches": [p.name for p in patches],
+            "retainedOverlays": sorted(retained_overlays),
+            "upstreamReplacements": replacements,
             "tree": git(destination, "rev-parse", "HEAD^{tree}").strip()}
 
 
@@ -277,7 +370,7 @@ def prepare(root=ROOT, *, pin=None, force=False, _keep_previous=False):
     if target.is_symlink():
         raise ProjectError("Generated source must not be a symlink")
     stamp = target / ".stronghold-build.json"
-    ordered_patches(root)
+    source_selection(root, pin)
     fingerprint = patch_fingerprint(root, pin)
     if stamp.is_file() and not force:
         metadata = json.loads(stamp.read_text())

@@ -1,6 +1,8 @@
 // Session-local team chat: no storage, offline queue, match state or replay history.
 import { createStore } from './store.js';
 import { NetError } from './net.js';
+import { setupRerollTransitionKey } from './setupRerollTransition.js';
+import { PHASE } from '../../shared/constants.js';
 import {
   CHAT_COOLDOWN_MS, CHAT_HISTORY_LIMIT, normalizeChatText, normalizeChatFaction, canTeamChat,
 } from '../../shared/chat.js';
@@ -15,10 +17,12 @@ export function installTeamChat({ net, store, target = chatStore, now = Date.now
   installed?.dispose();
   let disposed = false;
   let generation = 0;
+  let observedVote = null;
+  let restartSequence = 0;
   const context = (s) => ({ playerId: s.me?.playerId || null, code: s.room?.code || null, active: canTeamChat(s.room, s.me?.playerId) });
   let current = context(store.get());
   const same = (a, b) => a.playerId === b.playerId && a.code === b.code && a.active === b.active;
-  const reset = () => { generation++; target.set(fresh()); };
+  const reset = () => { generation++; observedVote = null; restartSequence = 0; target.set(fresh()); };
   const syncFactions = (room) => {
     const factions = {};
     for (const seat of Array.isArray(room?.seats) ? room.seats : []) {
@@ -31,11 +35,6 @@ export function installTeamChat({ net, store, target = chatStore, now = Date.now
   };
   reset();
   syncFactions(store.get().room);
-  const offStore = store.subscribe((s) => {
-    const next = context(s);
-    if (!same(next, current)) { current = next; reset(); }
-    syncFactions(s.room);
-  });
   const senderFor = (msg) => store.get().room?.seats?.find((seat) => seat?.playerId === msg.playerId
     && !seat.isBot && !seat.left && seat.connected !== false);
   const validEnvelope = (msg) => !disposed && current.active && msg.code === current.code
@@ -47,6 +46,46 @@ export function installTeamChat({ net, store, target = chatStore, now = Date.now
     target.set({ messages: [...previous, message].slice(-CHAT_HISTORY_LIMIT) });
     return true;
   };
+  // The upstream vote belongs to m.public. Display its first request without a second server vote protocol.
+  const announceReroll = (proposer) => append({ id: `${current.code}:setup-reroll:${++restartSequence}`,
+    kind: 'restart', code: current.code, playerId: proposer.playerId, name: proposer.name, at: now(), receivedAt: now() });
+  const rerollSnapshot = (s) => ({ code: s?.room?.code, inMatch: !!s?.room?.inMatch,
+    phase: s?.match?.public?.phase, revision: s?.match?.public?.setupRevision });
+  const syncReroll = (s, previous) => {
+    const pub = s.match?.public;
+    if (!current.active || !s.room?.inMatch || (pub && pub.phase !== PHASE.INFO_CHECK)) {
+      observedVote = null;
+      return;
+    }
+    const vote = pub?.rerollVote;
+    if (!vote) {
+      // One human (with AI teammates) completes the native vote without publishing a pending vote.
+      if (!previous || !same(context(previous), current) || previous.match?.public?.rerollVote
+        || !setupRerollTransitionKey(rerollSnapshot(previous), rerollSnapshot(s))) return;
+      const humans = s.room.seats.filter((seat) => seat && !seat.isBot && !seat.left);
+      const proposer = humans[0];
+      if (humans.length === 1 && proposer.playerId === s.room.hostId && proposer.connected !== false
+        && typeof proposer.name === 'string' && proposer.name.length <= 64
+        && pub.players?.some((player) => player.playerId === proposer.playerId && !player.isBot)) announceReroll(proposer);
+      return;
+    }
+    if (!Number.isSafeInteger(vote.id) || vote.id < 1
+      || !Number.isSafeInteger(pub.setupRevision) || pub.setupRevision < 0
+      || !Array.isArray(vote.voters) || !vote.voters.includes(vote.proposerId)) return;
+    const proposer = s.room.seats.find((seat) => seat?.playerId === vote.proposerId && !seat.isBot && !seat.left);
+    if (!proposer || typeof proposer.name !== 'string' || proposer.name.length > 64) return;
+    const key = `${current.code}:${pub.setupRevision}:${vote.id}`;
+    if (observedVote === key) return;
+    observedVote = key;
+    announceReroll(proposer);
+  };
+  syncReroll(store.get());
+  const offStore = store.subscribe((s, previous) => {
+    const next = context(s);
+    if (!same(next, current)) { current = next; reset(); }
+    syncFactions(s.room);
+    syncReroll(s, previous);
+  });
   const offChat = net.on('room.chat', (msg) => {
     if (!validEnvelope(msg)) return;
     const text = normalizeChatText(msg.text);
@@ -61,11 +100,6 @@ export function installTeamChat({ net, store, target = chatStore, now = Date.now
     const added = append({ id: `${msg.code}:${msg.seq}`, kind: 'faction', code: msg.code, seq: msg.seq,
       playerId: msg.playerId, name: msg.name, faction, at: msg.at, receivedAt: now() });
     if (added) target.set((state) => ({ factions: { ...(state.factions || {}), [msg.playerId]: faction } }));
-  });
-  const offRestart = net.on('room.restart', (msg) => {
-    if (!validEnvelope(msg)) return;
-    append({ id: `${msg.code}:${msg.seq}`, kind: 'restart', code: msg.code, seq: msg.seq,
-      playerId: msg.playerId, name: msg.name, at: msg.at, receivedAt: now() });
   });
   const request = async (type, fields) => {
     const state = target.get();
@@ -101,7 +135,7 @@ export function installTeamChat({ net, store, target = chatStore, now = Date.now
     dispose() {
       if (disposed) return;
       disposed = true;
-      offStore(); offChat(); offFaction(); offRestart(); reset();
+      offStore(); offChat(); offFaction(); reset();
       if (installed === controller) installed = null;
     },
   };

@@ -4,6 +4,7 @@ import { createStore } from '../public/js/store.js';
 import { Net } from '../public/js/net.js';
 import { installTeamChat, sendTeamChat, sendTeamFaction } from '../public/js/chat.js';
 import { normalizeChatFaction } from '../shared/chat.js';
+import { PHASE } from '../shared/constants.js';
 
 function clockTimers() {
   let time = 1000; let next = 0;
@@ -47,6 +48,65 @@ function setup() {
 }
 
 describe('isolated team chat controller', () => {
+  test('upstream reroll requests appear once and chat survives a reroll and the next draft', () => {
+    const c = setup();
+    const vote = { id: 1, proposerId: peer.playerId, voters: [own.playerId, peer.playerId], agreed: [peer.playerId] };
+    const pub = { phase: PHASE.INFO_CHECK, setupRevision: 0, rerollVote: vote };
+    try {
+      c.emit(1);
+      c.store.set({ room: { ...room(), inMatch: true }, match: { public: pub } });
+      assert.deepEqual(c.target.get().messages.map((m) => m.kind), ['chat', 'restart']);
+      assert.equal(c.target.get().messages[1].name, peer.name);
+      c.store.set({ match: { public: { ...pub, rerollVote: { ...vote, agreed: vote.voters } } } });
+      c.store.set({ room: { ...room(), inMatch: true } });
+      assert.equal(c.target.get().messages.length, 2, 'vote progress and room resync are not new requests');
+      c.store.set({ match: { public: { ...pub, setupRevision: 1, rerollVote: null } } });
+      c.store.set({ match: { public: { ...pub, phase: PHASE.BAND_DRAFT, setupRevision: 1, rerollVote: null } } });
+      c.emit(2);
+      assert.deepEqual(c.target.get().messages.map((m) => m.kind), ['chat', 'restart', 'chat']);
+      c.store.set({ room: { ...room(), inMatch: false }, match: { public: null } });
+      c.store.set({ room: { ...room(), inMatch: true }, match: { public: pub } });
+      assert.equal(c.target.get().messages.length, 4, 'a new match may restart its vote IDs without losing room history');
+      assert.notEqual(c.target.get().messages[1].id, c.target.get().messages[3].id);
+    } finally { c.dispose(); }
+  });
+
+  test('reroll announcements ignore unknown players, spectators, and out-of-phase votes', () => {
+    const c = setup();
+    const pub = { phase: PHASE.INFO_CHECK, setupRevision: 0, rerollVote: { id: 1, proposerId: 'ai_bot', voters: ['ai_bot'] } };
+    try {
+      c.store.set({ room: { ...room(), inMatch: true }, match: { public: pub } });
+      assert.equal(c.target.get().messages.length, 0);
+      c.store.set({ match: { public: { ...pub, phase: PHASE.COMBAT,
+        rerollVote: { id: 2, proposerId: peer.playerId, voters: [peer.playerId] } } } });
+      assert.equal(c.target.get().messages.length, 0);
+      c.store.set({ room: { ...room(), inMatch: true, seats: [peer], spectators: [own] }, match: { public: pub } });
+      assert.equal(c.target.get().messages.length, 0);
+    } finally { c.dispose(); }
+  });
+
+  test('a one-human cooperative reroll announces its immediate completion once', () => {
+    const c = setup();
+    const bot = { playerId: 'ai_bot', name: 'AI', isBot: true, connected: true };
+    const activeRoom = { ...room(), hostId: own.playerId, inMatch: true, seats: [own, bot] };
+    const pub = { phase: PHASE.INFO_CHECK, setupRevision: 0, rerollVote: null, players: [own, bot] };
+    try {
+      c.store.set({ room: activeRoom, match: { public: pub } });
+      assert.equal(c.target.get().messages.length, 0, 'the initial setup is not a reroll');
+      c.store.set({ match: { public: { ...pub, setupRevision: 1 } } });
+      c.store.set({ match: { public: { ...pub, setupRevision: 1 } } });
+      c.store.set({ room: { ...activeRoom } });
+      assert.deepEqual(c.target.get().messages.map((m) => [m.kind, m.name]), [['restart', own.name]]);
+      c.store.set({ match: { public: { ...pub, setupRevision: 2 } } });
+      assert.equal(c.target.get().messages.length, 2);
+      assert.notEqual(c.target.get().messages[0].id, c.target.get().messages[1].id);
+      c.store.set({ room: { ...activeRoom, code: 'EFGH' }, match: { public: { ...pub, setupRevision: 3 } } });
+      assert.equal(c.target.get().messages.length, 0, 'joining a different setup is not a reroll');
+      c.store.set({ room: { ...activeRoom, code: 'EFGH', seats: [own, peer, bot] }, match: { public: { ...pub, setupRevision: 4 } } });
+      assert.equal(c.target.get().messages.length, 0, 'multi-human votes use their published request');
+    } finally { c.dispose(); }
+  });
+
   test('history remains for the room, is bounded, deduplicated and never changes match state', () => {
     const c = setup();
     try {

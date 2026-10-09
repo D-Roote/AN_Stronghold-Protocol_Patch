@@ -64,7 +64,7 @@ class KoreanUITests(unittest.TestCase):
     def test_changed_or_deleted_guarded_values_reject_without_mutating_input(self):
         first = next(iter(self.layer["messages"]))
         cases = [("messages", first, "changed"), ("messages", first, "deleted"),
-                 ("meta", "version", "changed"), ("meta", "credits", "deleted")]
+                 ("meta", "version", "changed"), ("meta", "version", "deleted")]
         for section, key, action in cases:
             with self.subTest(section=section, action=action):
                 document = copy.deepcopy(self.document)
@@ -162,6 +162,130 @@ class ProjectTests(unittest.TestCase):
     def prepare(self, **kwargs):
         with patch.object(project, "ensure_upstream", return_value=self.upstream):
             return project.prepare(self.root, **kwargs)
+
+    def adoption_manifest(self):
+        adopted = {
+            "schemaVersion": 1,
+            "upstream": {"ref": self.pin["ref"], "commit": self.pin["commit"]},
+            "retainedPatches": [{"file": "01-001-Build-marker.patch", "reason": "Adopt upstream marker"}],
+            "retainedOverlays": [{"file": "tools/custom-check.mjs", "reason": "Use native checker"}],
+            "replacementFiles": ["Dockerfile"],
+        }
+        project.write_json(self.root / "patches/upstream-adoptions.json", adopted)
+        return adopted
+
+    def data_localization_fixture(self):
+        layer = copy.deepcopy(json.loads((REPOSITORY / "patches/02-910-UI-korean-data-typo.json").read_text()))
+        document = {"files": {"config": {"modes": {
+            "mode_single_abyss": {"desc": layer["changes"][0]["base"]},
+            "mode_multi_abyss": {"desc": layer["changes"][1]["base"]}}, "_h": "source-hash"}}}
+        project.write_json(self.upstream / "data/i18n/ko.json", document, compact=True)
+        self.pin["commit"] = self.commit_fixture("Korean data fixture")
+        project.write_json(self.root / "upstream.lock.json", self.pin)
+        project.write_json(self.root / "patches/02-910-UI-korean-data-typo.json", layer)
+        return layer, document
+
+    def test_sparse_localization_corrects_both_modes_without_changing_other_data_or_upstream(self):
+        layer, document = self.data_localization_fixture()
+        original = (self.upstream / "data/i18n/ko.json").read_bytes()
+        source = self.prepare()
+        result = json.loads((source / "data/i18n/ko.json").read_text())
+        self.assertEqual(result["files"]["config"]["_h"], document["files"]["config"]["_h"])
+        for mode in ["mode_single_abyss", "mode_multi_abyss"]:
+            self.assertEqual(result["files"]["config"]["modes"][mode]["desc"], "적의 공격 강도가 한계를 뛰어넘은 시뮬레이션")
+        self.assertEqual((self.upstream / "data/i18n/ko.json").read_bytes(), original)
+        self.assertEqual(project.apply_data_patch(result, layer), result, 'already corrected strings are accepted')
+        metadata = json.loads((source / ".stronghold-build.json").read_text())
+        self.assertEqual(metadata["appliedPatches"][-1], "02-910-UI-korean-data-typo.json")
+
+    def test_changed_or_missing_localized_fields_preserve_the_previous_generated_source(self):
+        layer, document = self.data_localization_fixture()
+        source = self.prepare()
+        head = self.git(source, "rev-parse", "HEAD")
+        for field in ["another upstream value", "missing"]:
+            bad = copy.deepcopy(layer)
+            if field == "missing":
+                bad["changes"][0]["path"][-1] = "missing"
+            else:
+                bad["changes"][0]["base"] = field
+                bad["changes"][0]["value"] = "replacement"
+            project.write_json(self.root / "patches/02-910-UI-korean-data-typo.json", bad)
+            with self.assertRaisesRegex(project.ProjectError, "Upstream Korean data changed"):
+                self.prepare()
+            self.assertEqual(self.git(source, "rev-parse", "HEAD"), head)
+            self.assertEqual(json.loads((self.upstream / "data/i18n/ko.json").read_text()), document)
+
+    def test_localization_rejects_gameplay_file_targets_and_shared_indices(self):
+        layer, _ = self.data_localization_fixture()
+        source = self.prepare()
+        head = self.git(source, "rev-parse", "HEAD")
+        project.write_json(self.root / "patches/02-910-UI-korean-data-typo.json", dict(layer, file="data/config.json"))
+        with self.assertRaisesRegex(project.ProjectError, "must target data/i18n/ko.json"):
+            self.prepare()
+        self.assertEqual(self.git(source, "rev-parse", "HEAD"), head)
+        (self.root / "patches/02-910-UI-another-change.patch").write_text("unused")
+        with self.assertRaisesRegex(project.ProjectError, "Duplicate patch index"):
+            project.ordered_patches(self.root)
+
+    def test_localization_rejects_duplicate_paths_non_text_edits_and_invalid_schema(self):
+        layer, document = self.data_localization_fixture()
+        bad_changes = [layer["changes"] * 2, [], [dict(layer["changes"][0], value=42)],
+                       [dict(layer["changes"][0], path=[])], [dict(layer["changes"][0], path=["files", 0])]]
+        for changes in bad_changes:
+            with self.subTest(changes=changes):
+                with self.assertRaises(project.ProjectError):
+                    project.apply_data_patch(document, dict(layer, changes=changes))
+        with self.assertRaises(project.ProjectError):
+            project.apply_data_patch(document, dict(layer, type="gameplay"))
+
+    def test_adopted_implementations_are_excluded_from_build_but_preserved_for_review(self):
+        paths = [self.root / "patches/01-001-Build-marker.patch", self.root / "overlays/tools/custom-check.mjs"]
+        before = [path.read_bytes() for path in paths]
+        self.adoption_manifest()
+        source = self.prepare()
+        self.assertEqual((source / "Dockerfile").read_text(), (self.upstream / "Dockerfile").read_text())
+        self.assertFalse((source / "tools/custom-check.mjs").exists())
+        self.assertEqual([path.read_bytes() for path in paths], before)
+        self.assertEqual(json.loads((source / "public/i18n/ko.json").read_text())["hello"], "교정")
+        metadata = json.loads((source / ".stronghold-build.json").read_text())
+        self.assertEqual(metadata["appliedPatches"], [])
+        self.assertEqual(metadata["retainedOverlays"], ["tools/custom-check.mjs"])
+
+    def test_adoptions_for_a_different_release_require_review_before_replacing_source(self):
+        source = self.prepare()
+        head = self.git(source, "rev-parse", "HEAD")
+        adopted = self.adoption_manifest()
+        for key, value in [("ref", "v0.2.3"), ("commit", "0" * 40)]:
+            with self.subTest(key=key):
+                changed = copy.deepcopy(adopted)
+                changed["upstream"][key] = value
+                project.write_json(self.root / "patches/upstream-adoptions.json", changed)
+                with self.assertRaisesRegex(project.ProjectError, "Review retained patches"):
+                    self.prepare()
+                self.assertEqual(self.git(source, "rev-parse", "HEAD"), head)
+
+    def test_adoptions_reject_missing_sources_duplicate_paths_and_unsafe_paths(self):
+        adopted = self.adoption_manifest()
+        cases = [dict(adopted, retainedPatches=[{"file": "03-999-Feat-missing.patch", "reason": "native"}]),
+                 dict(adopted, retainedOverlays=adopted["retainedOverlays"] * 2),
+                 dict(adopted, retainedOverlays=[{"file": "../outside", "reason": "native"}]),
+                 dict(adopted, retainedPatches=[{"file": "ko-ui.json", "reason": "native"}]),
+                 dict(adopted, retainedPatches=[{"file": "01-001-Build-marker.patch", "reason": ""}])]
+        for index, changed in enumerate(cases):
+            with self.subTest(index=index):
+                project.write_json(self.root / "patches/upstream-adoptions.json", changed)
+                with self.assertRaises(project.ProjectError):
+                    self.prepare()
+
+    def test_missing_native_replacement_keeps_last_usable_source(self):
+        source = self.prepare()
+        head = self.git(source, "rev-parse", "HEAD")
+        adopted = self.adoption_manifest()
+        adopted["replacementFiles"] = ["server/missing-native-vote.js"]
+        project.write_json(self.root / "patches/upstream-adoptions.json", adopted)
+        with self.assertRaisesRegex(project.ProjectError, "replacement is missing"):
+            self.prepare()
+        self.assertEqual(self.git(source, "rev-parse", "HEAD"), head)
 
     def update_with_local_release(self, ref, candidate_commit, *, supplied_digest=None):
         release = {"assets": [{"name": f"Stronghold-Protocol-{ref}.zip", "digest": "sha256:" + "b" * 64}]}

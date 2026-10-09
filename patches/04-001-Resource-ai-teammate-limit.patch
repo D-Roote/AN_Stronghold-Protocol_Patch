@@ -1,11 +1,11 @@
 diff --git a/public/i18n/en.json b/public/i18n/en.json
-index 6318be5931207fefc7b6e06d445d9c345641425a..25664d803239965165701b26bdd1507bc7fb210b 100644
+index b7dcdf2f3c14648e08ddb9dfe708afdab62739bd..81041c6a80dfdd50945c008844661252ee8d9b82 100644
 --- a/public/i18n/en.json
 +++ b/public/i18n/en.json
-@@ -1245,5 +1245,6 @@
-   "重启投票": "Restart vote",
-   "重启 {n} / {total}": "Restart {n} / {total}",
-   "重启投票发送失败，请重试": "Could not send the restart vote. Please try again.",
+@@ -1266,5 +1266,6 @@
+   "干员配音语言": "Operator voice language",
+   "所选语言没有该干员的语音时保持静音。": "Operators without voices in the selected language remain silent.",
+   "关闭聊天后，消息将在5秒后隐藏": "Messages fade 5 seconds after closing chat",
 -  "{name}博士请求重新开始模拟。": "{name} requested a vote to restart the simulation."
 +  "{name}博士请求重新开始模拟。": "{name} requested a vote to restart the simulation.",
 +  "AI队友已达上限（{n}名）": "AI teammate limit reached ({n})"
@@ -71,10 +71,10 @@ index 2543c3defc323ee92cd38e3a99766051e1008ecf..08e150b91f59f700d073a6988dc742ef
   *   heavyPerSec?: number, heavyBurst?: number, trustProxy?: 'auto' | boolean, soloReconnectWindowMs?: number,
   * }} [opts]
 diff --git a/server/lobby.js b/server/lobby.js
-index b2ffb81524903013fec0f338aea6af6380ddf3b6..4d0b810ac5fbf3d2154335675c49271696d9cd6c 100644
+index 65ca808f60be6f178f7a5337ea961a38c5b8957c..9e11be39494971489bce24cdc81a6c5226277954 100644
 --- a/server/lobby.js
 +++ b/server/lobby.js
-@@ -115,6 +115,7 @@ export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+@@ -114,6 +114,7 @@ export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
  export const LOBBY_DEFAULTS = Object.freeze({
    lobbyGraceMs: 60_000,   // disconnected humans keep their lobby seat this long
    maxRooms: 1000,
@@ -82,7 +82,7 @@ index b2ffb81524903013fec0f338aea6af6380ddf3b6..4d0b810ac5fbf3d2154335675c492716
    maxRoomsPerAddr: 16,    // rooms created from one client network that may exist at once (0 = unlimited)
    maxMatchesPerAddr: 8,   // matches started from one client network that may run at once (0 = unlimited)
    resyncMinGapMs: 1000,   // heavy resyncs (match state / result replay) per session at most this often on repeated hellos
-@@ -173,7 +174,7 @@ function freezeDiy(picks) {
+@@ -172,7 +173,7 @@ function freezeDiy(picks) {
  /** One room: 4 seat slots, host, difficulty, optional running match. */
  export class Room {
    /** @param {string} code @param {'solo'|'coop'} mode @param {string} difficulty @param {number} now */
@@ -91,7 +91,7 @@ index b2ffb81524903013fec0f338aea6af6380ddf3b6..4d0b810ac5fbf3d2154335675c492716
      this.code = code;
      this.mode = mode;
      this.difficulty = difficulty;
-@@ -192,6 +193,7 @@ export class Room {
+@@ -191,6 +192,7 @@ export class Room {
      this.match = null;
      /** @type {{ live: boolean, ended: boolean, disposed: boolean, match: any } | null} */
      this.matchCtx = null;
@@ -99,7 +99,7 @@ index b2ffb81524903013fec0f338aea6af6380ddf3b6..4d0b810ac5fbf3d2154335675c492716
      this.matchCount = 0;
      this.chatSeq = 0;
      /** @type {any} summary passed to onEnd by the last match */
-@@ -234,6 +236,7 @@ export class Room {
+@@ -233,6 +235,7 @@ export class Room {
        difficulty: this.difficulty,
        aiPicksLast: this.aiPicksLast,
        inMatch: !!this.match,
@@ -107,7 +107,7 @@ index b2ffb81524903013fec0f338aea6af6380ddf3b6..4d0b810ac5fbf3d2154335675c492716
        seats: this.seats.map((s) => (s
          ? { seat: s.seat, playerId: s.playerId, name: s.name, isBot: s.isBot, ready: s.ready, connected: s.connected && !s.left,
            ...(s.faction ? { faction: s.faction } : {}) }
-@@ -265,6 +268,9 @@ export class Lobby {
+@@ -263,6 +266,9 @@ export class Lobby {
      this.now = now;
      this.seedFn = seedFn || (() => randomInt(2 ** 32));
      this.opts = { ...LOBBY_DEFAULTS, ...options };
@@ -117,7 +117,7 @@ index b2ffb81524903013fec0f338aea6af6380ddf3b6..4d0b810ac5fbf3d2154335675c492716
      /** @type {Map<string, Room>} */
      this.rooms = new Map();
      /** @type {Map<string, NodeJS.Timeout>} lobby grace timers by playerId */
-@@ -468,7 +474,7 @@ export class Lobby {
+@@ -467,7 +473,7 @@ export class Lobby {
      const code = this.genCode();
      if (!code) return fail(ERR.INTERNAL, 'no room code available');
      if (cur) this.removeMember(cur, session.playerId);
@@ -126,7 +126,7 @@ index b2ffb81524903013fec0f338aea6af6380ddf3b6..4d0b810ac5fbf3d2154335675c492716
      room.ownerKey = key;
      room.seats[0] = this.humanSeat(0, session);
      room.hostId = session.playerId;
-@@ -606,6 +612,7 @@ export class Lobby {
+@@ -605,6 +611,7 @@ export class Lobby {
      if (room.match) return fail(ERR.ROOM_STARTED);
      this.dropReplay(room, session.playerId);
      if (room.mode === 'solo') return fail(ERR.ROOM_FULL, 'solo rooms cannot have AI teammates');
