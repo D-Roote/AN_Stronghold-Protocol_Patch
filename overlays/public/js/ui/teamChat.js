@@ -258,8 +258,11 @@ export function TeamChat({
     </section>` : null}
     <button type="button" class="team-chat__toggle" ref=${toggleRef} aria-expanded=${open ? 'true' : 'false'} aria-controls="team-chat-panel"
       aria-label=${t('队伍聊天')} title=${t('队伍聊天')} onClick=${() => onToggle(!open)}>
-      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 4h16v12H9l-5 4zm2 2v10l2-2h10V6z" fill-rule="evenodd" /></svg>
-      <span>${t('聊天')}</span>
+      <svg class="icon team-chat__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M4 3h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H9l-7 3V5a2 2 0 0 1 2-2Z" />
+        <circle cx="7.5" cy="11" r="1.25" /><circle cx="12" cy="11" r="1.25" /><circle cx="16.5" cy="11" r="1.25" />
+      </svg>
+      <span class="team-chat__label">${t('聊天')}</span>
     </button>
   </div>`;
 }

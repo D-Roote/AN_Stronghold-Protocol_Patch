@@ -38,11 +38,25 @@
   white-space: nowrap;
 }
 .team-chat__toggle .icon {
+  display: block;
   flex: 0 0 auto;
-  width: max(.2rem, 15px);
-  height: max(.2rem, 15px);
-  fill: currentColor;
+  width: max(.28rem, 20px);
+  height: max(.28rem, 20px);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linejoin: round;
 }
+.team-chat__icon circle { fill: currentColor; stroke: none; }
+.team-chat__label { display: block; line-height: 1; }
+/* Match chat stays beside the tools disclosure; the narrower button moves the menu with the flex row. */
+.gm__corner--tools > .team-chat .team-chat__toggle { width: var(--team-control-h); padding: 0; gap: 0; }
+.gm__corner--tools > .team-chat .team-chat__label { display: none; }
+.gm__corner--tools > .team-chat .team-chat__icon {
+  width: calc(var(--team-control-h) * .78);
+  height: calc(var(--team-control-h) * .78);
+}
+.sp-coarse .gm__corner--tools .gm__tools .gm__gear::before { width: 100%; }
 .team-chat__toggle:hover,
 .team-chat__toggle:focus-visible,
 .team-chat.is-open .team-chat__toggle,
@@ -309,3 +323,8 @@
   height: max(.4rem, var(--tap-min));
 }
 .sp-coarse .title-guide { min-height: var(--tap-min); }
+
+/* Explicit label boxes keep the voice selector centered instead of relying on native button baselines. */
+.set-voice button { display: flex; align-items: center; justify-content: center; padding: 0 .1rem; line-height: 1; }
+.set-voice__label { display: block; line-height: 1; }
+.set-voice [data-voice-lang="jp"] .set-voice__label { transform: translateX(-.1em); }
