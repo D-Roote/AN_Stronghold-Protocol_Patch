@@ -24,7 +24,7 @@ index 3c0d3b6ef5d8136957b71772b15c13dde72ad26b..84cae296b39eb5615d74923ad4c975ee
 +  "关闭聊天后，消息将在10秒后隐藏": "Messages fade 10 seconds after closing chat"
  }
 diff --git a/public/js/screens/bandDraft.js b/public/js/screens/bandDraft.js
-index 46d9e791638486232e5825be7df13e857d89af08..93ef0556c17d12c299cc388ef4253a3a15e4d384 100644
+index 46d9e791638486232e5825be7df13e857d89af08..81dbf875d638ff5b0dd88199e0636dcb55bee7e6 100644
 --- a/public/js/screens/bandDraft.js
 +++ b/public/js/screens/bandDraft.js
 @@ -26,6 +26,8 @@ import { MatchInfoDialog, matchInfoModel } from '../ui/matchInfo.js';
@@ -48,15 +48,24 @@ index 46d9e791638486232e5825be7df13e857d89af08..93ef0556c17d12c299cc388ef4253a3a
    const roomSolo = useStore((s) => s.room?.mode === 'solo');
    const gd = useGameData();
    const [sel, setSel] = useState(null);
-@@ -324,6 +331,8 @@ export function BandDraftScreen() {
-         </div>
+@@ -256,6 +263,7 @@ export function BandDraftScreen() {
+     <main class="draft__main">
+       <aside class="draft-order">
+         <h3 class="brief-h"><span>${solo ? t('独立模拟') : t('决策顺序')}</span><${MicroLabel}>${solo ? 'FREE PICK' : 'RANDOM ORDER'}</${MicroLabel}></h3>
++        <div class="draft-order__scroll">
+         ${(solo ? players.filter((p) => p.playerId === myId) : draft.order.map((pid) => players.find((p) => p.playerId === pid)).filter(Boolean)).map((p, i) => {
+           const picked = draft.picks.get(p.playerId) || (p.playerId === myId ? myPick : p.bandId) || null;
+           const cur = !picked && (solo || draft.turnPid === p.playerId);
+@@ -278,6 +286,9 @@ export function BandDraftScreen() {
+         })}
+         <${Button} variant="secondary" icon="search" block=${true} class="draft-order__info" data-testid="match-info-open"
+           aria-haspopup="dialog" onClick=${() => setInfoOpen(true)}>${t('查看禁用盟约与干员')}<//>
++        </div>
++        ${chatAvailable ? html`<div class="phase-chat phase-chat--draft"><${TeamChat} key=${room.code} playerId=${myId}
++          online=${conn.status === 'online'} open=${chatOpen} onToggle=${setChatOpen} /></div>` : null}
+         ${!solo ? html`<p class="draft-order__tip" data-testid="draft-tip">${draftTip({ timed, turnSeconds: turnLen, autoName: myPick ? null : autoName, selected: autoId === sel })}</p>` : null}
        </aside>
-     </main>
-+    ${chatAvailable ? html`<div class="phase-chat phase-chat--draft"><${TeamChat} key=${room.code} playerId=${myId}
-+      online=${conn.status === 'online'} open=${chatOpen} onToggle=${setChatOpen} /></div>` : null}
-     <${ExitModal} open=${exit} onClose=${() => setExit(false)} solo=${solo} />
-     <${MatchInfoDialog} open=${infoOpen} onClose=${() => setInfoOpen(false)} model=${info}
-       status=${infoStatus ? html`<span class=${cx('minfo-dlg__turn', `is-${infoStatus.tone}`)}>
+ 
 diff --git a/public/js/screens/room.js b/public/js/screens/room.js
 index 9768e3108f62f033c2dd1cfea2c00cb0ee070bf9..8a8982238b9c894f45ba99f8ea6c0248052830aa 100644
 --- a/public/js/screens/room.js

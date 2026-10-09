@@ -12,6 +12,7 @@ import { useData } from '../data.js';
 import { emoteUiSprite } from './emotes.js';
 
 export const TEAM_CHAT_CSS_HREF = '/css/team-chat.css';
+const CHAT_EMPTY_IDLE_MS = 5000;
 
 /** Also load the stylesheet in development harnesses that do not use the main index. */
 export function ensureTeamChatCss(doc = globalThis.document) {
@@ -183,6 +184,16 @@ function useChatEnterShortcut(options) {
   }, []);
 }
 
+function useEmptyChatAutoClose({ open, text, sending, pickerOpen, composing, activity, onToggle }) {
+  const latestToggle = useRef(onToggle);
+  latestToggle.current = onToggle;
+  useEffect(() => {
+    if (!open || text.trim() || sending || pickerOpen || composing) return undefined;
+    const timer = setTimeout(() => latestToggle.current(false), CHAT_EMPTY_IDLE_MS);
+    return () => clearTimeout(timer);
+  }, [open, text, sending, pickerOpen, composing, activity]);
+}
+
 /** Retain session history while briefly showing incoming messages even with the composer closed. */
 export function TeamChat({
   open, onToggle, online, playerId, target = chatStore, onSend = sendTeamChat, onSelectFaction = sendTeamFaction,
@@ -192,6 +203,8 @@ export function TeamChat({
   const [text, setText] = useState('');
   const [error, setError] = useState(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [composing, setComposing] = useState(false);
+  const [idleActivity, setIdleActivity] = useState(0);
   const [preview, setPreview] = useState(null);
   const [, redraw] = useState(0);
   const rootRef = useRef(null);
@@ -211,6 +224,9 @@ export function TeamChat({
   const send = chatSendState({ text, online, sending: state.sending || pending.current, lastSentAt: state.lastSentAt }, now);
   const factionAction = chatSendState({ text: 'faction', online, sending: state.sending || pending.current, lastSentAt: state.lastSentAt }, now);
   const chars = [...text].length;
+  const noteActivity = () => setIdleActivity((value) => value + 1);
+  useEmptyChatAutoClose({ open, text, sending: state.sending || pending.current,
+    pickerOpen, composing, activity: idleActivity, onToggle });
 
   useLayoutEffect(() => {
     const last = messageRef.current.at(-1);
@@ -232,7 +248,9 @@ export function TeamChat({
     wasOpen.current = open;
   }, [open, state.messages, state.factions]);
   useEffect(() => () => { if (previewTimer.current != null) clearTimeout(previewTimer.current); }, []);
-  useEffect(() => { if (!open) setPickerOpen(false); }, [open]);
+  useEffect(() => {
+    if (!open) { setPickerOpen(false); setComposing(false); }
+  }, [open]);
   useEffect(() => {
     const deadline = state.lastSentAt == null ? null : state.lastSentAt + CHAT_COOLDOWN_MS;
     if (deadline == null || deadline <= Date.now()) return undefined;
@@ -284,7 +302,11 @@ export function TeamChat({
   const selectedFaction = state.factions?.[playerId] || null;
 
   return html`<div class=${`team-chat${open ? ' is-open' : ''}${emoteUiSprite('emoji_btn') ? ' has-emote-sprite' : ''}`} ref=${rootRef}
-    onKeyDown=${(event) => { if (open || (event.target === toggleRef.current && [' ', 'Enter'].includes(event.key))) event.stopPropagation(); }}>
+    onPointerDown=${noteActivity} onWheel=${noteActivity} onTouchMove=${noteActivity}
+    onKeyDown=${(event) => {
+      noteActivity();
+      if (open || (event.target === toggleRef.current && [' ', 'Enter'].includes(event.key))) event.stopPropagation();
+    }}>
     ${open || messages.length ? html`<section id="team-chat-panel" class=${`team-chat__panel${open ? '' : ' is-feed-only'}`} aria-label=${t('队伍聊天')}>
       <${TeamChatFeed} messages=${messages} factions=${open ? state.factions || {} : preview?.factions || {}} playerId=${playerId}
         onScroll=${(event) => { if (open) feedScroll.current = event.currentTarget.scrollTop; }} />
@@ -294,6 +316,8 @@ export function TeamChat({
             placeholder=${t('输入消息，Enter发送')} autocomplete="off" spellcheck=${false} aria-label=${t('队伍聊天')}
             aria-describedby=${note ? 'team-chat-note' : undefined}
             onInput=${(event) => { setText(event.currentTarget.value); setError(null); }}
+            oncompositionstart=${() => setComposing(true)}
+            oncompositionend=${(event) => { setComposing(false); setText(event.currentTarget.value); noteActivity(); }}
             onKeyDown=${(event) => {
               if (event.key === 'Enter' && (event.isComposing || event.keyCode === 229 || event.repeat)) event.preventDefault();
             }} />

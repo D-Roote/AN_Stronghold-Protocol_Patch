@@ -1,0 +1,30 @@
+diff --git a/public/css/screens/draft.css b/public/css/screens/draft.css
+index 31d32cc8d3c6c0ac780c60bfdda4856ac3ede9c2..52c7c42e496c4c850a49ec9070b1546520d1467c 100644
+--- a/public/css/screens/draft.css
++++ b/public/css/screens/draft.css
+@@ -132,3 +132,25 @@
+ .minfo-dlg .brief-banned__grid .uthumb { --ut: max(.6rem, 34px); }
+ .minfo-dlg .brief-banned__diy { font-size: max(.14rem, 12px); }
+ .minfo-dlg .t-dim { font-size: max(.16rem, 10px); }
++
++/* Removable upstream UI correction: only genuinely narrow order rows should overflow horizontally. */
++.draft-order .dorder {
++  grid-template-columns: auto auto minmax(0, 1fr) auto;
++  min-width: max(2.8rem, 128px);
++}
++.draft-order .dorder__state { overflow-wrap: anywhere; }
++.draft-order .dorder__state span { max-width: 100%; flex-wrap: wrap; }
++.draft-order__info {
++  height: auto;
++  min-height: max(.5rem, 28px);
++  padding-top: max(.04rem, 3px);
++  padding-bottom: max(.04rem, 3px);
++}
++/* Invisible scaled hover brackets also contribute to scrollWidth; keep them inside this button. */
++.draft-order__info::after { inset: 0; transform: none; }
++.draft-order__info .btn__label {
++  min-width: 0;
++  white-space: normal;
++  overflow-wrap: anywhere;
++  line-height: 1.3;
++}
