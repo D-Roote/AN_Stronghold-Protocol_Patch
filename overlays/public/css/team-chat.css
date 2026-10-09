@@ -338,6 +338,18 @@
 .title-tools .title-fs { flex: 0 0 auto; width: max(.4rem, 36px); height: max(.4rem, 36px); margin-left: 0; }
 .title-tools .fsbtn { display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; }
 .title-tools .fsbtn .icon { display: block; flex: 0 0 auto; margin: 0; }
+.title-tools .title-stats {
+  flex: 0 0 auto;
+  height: max(.4rem, 36px);
+  min-width: max(.72rem, 60px);
+  padding: 0 max(.07rem, 5px);
+  gap: max(.05rem, 4px);
+  font-size: max(.14rem, 12px);
+  line-height: 1;
+  white-space: nowrap;
+}
+.title-tools .title-stats .btn__icon { width: max(.2rem, 16px); height: max(.2rem, 16px); }
+.sp-coarse .title-tools .title-stats { height: max(.4rem, var(--tap-min)); }
 .sp-coarse .title-settings,
 .sp-coarse .title-fs {
   flex: 0 0 auto;
@@ -357,3 +369,29 @@
 .set-voice button { display: flex; align-items: center; justify-content: center; padding: 0 .1rem; line-height: 1; }
 .set-voice__label { display: block; line-height: 1; }
 .set-voice [data-voice-lang="jp"] .set-voice__label { transform: translateX(-.1em); }
+
+/* Give the new stats/settings controls room without crossing the centered screen heading. */
+@media (max-width: 767px) {
+  .lobby-screen .topbar,
+  .room-screen .topbar {
+    height: auto;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas: 'heading heading' 'left right';
+    gap: max(.12rem, 6px) max(.2rem, 10px);
+    padding-top: max(.15rem, 8px);
+    padding-bottom: max(.15rem, 8px);
+  }
+  .lobby-screen .topbar__center,
+  .room-screen .topbar__center { grid-area: heading; min-width: 0; }
+  .lobby-screen .topbar__left,
+  .room-screen .topbar__left { grid-area: left; flex-wrap: wrap; gap: max(.12rem, 6px); }
+  .lobby-screen .topbar__right,
+  .room-screen .topbar__right { grid-area: right; flex-wrap: wrap; justify-content: flex-end; max-width: 100%; gap: max(.12rem, 6px); }
+  .lobby-screen .topbar :is(.stats-entry, .settings-btn, .guide-btn, .lobby-loadout),
+  .room-screen .topbar :is(.stats-entry, .settings-btn, .guide-btn) {
+    min-width: 44px;
+    min-height: 32px;
+    font-size: max(.14rem, 12px);
+    white-space: nowrap;
+  }
+}

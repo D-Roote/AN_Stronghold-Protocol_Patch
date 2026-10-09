@@ -72,6 +72,14 @@ export async function fetchVoicePacks(root = ROOT, options = {}) {
   const banks = { ...manifest.audio?.voicePacks, [baseLang]: manifest.audio.voice };
   for (const lang of languages) {
     if (lang === baseLang) continue;
+    if (lang === 'jp' && manifest.audio?.voiceJp) {
+      const native = checkVoices({ audio: { voicePacks: { jp: manifest.audio.voiceJp } } }, 'jp', root);
+      if (!native.errors.length) {
+        banks.jp = manifest.audio.voiceJp;
+        log(`[voice-packs] JP: reuse the validated upstream voice pack (${native.files} files)`);
+        continue;
+      }
+    }
     const template = planVoicePack(manifest, charword, lang);
     const leaves = collectLeaves(template);
     log(`[voice-packs] ${lang.toUpperCase()}: ${leaves.length} planned battle lines`);

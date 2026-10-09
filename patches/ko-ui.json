@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "language": "ko",
   "source": {
-    "tag": "v0.2.1",
-    "commit": "c2a2ef778cf728ff29b953b9842b2a39b1e9cbea"
+    "tag": "v0.2.2",
+    "commit": "62eb113419123d9a3a63606107bbf85230c5dd2f"
   },
   "file": "public/i18n/ko.json",
   "meta": {
     "version": {
       "base": "0.2.0",
-      "value": "0.2.1"
+      "value": "0.2.2"
     },
     "credits": {
       "base": "Game texts (data/i18n/ko.json): the official KR client data (© Hypergryph / Yostar) via ArknightsAssets/ArknightsGamedata. Interface strings machine-translated on 2026-10-07 using the official Korean game terms of the KR client; corrections are welcome on GitHub.",

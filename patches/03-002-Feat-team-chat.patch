@@ -1,8 +1,8 @@
 diff --git a/public/i18n/en.json b/public/i18n/en.json
-index 6046bb3af3568612c2213256cf8caf8339f75e6c..65d196ce51a1cc27e5225e0b0911b0bf6f966abd 100644
+index 0f27345945af5264fdddea67b95e4cee5cbc6f4a..3c0d3b6ef5d8136957b71772b15c13dde72ad26b 100644
 --- a/public/i18n/en.json
 +++ b/public/i18n/en.json
-@@ -1082,5 +1082,19 @@
+@@ -1210,5 +1210,19 @@
    "本次下载 {size} · 已有缓存 {count} 个": "Downloaded {size} · {count} already cached",
    "{count} 个文件下载失败，可稍后重试。": "{count} files failed to download. You can retry later.",
    "浏览器存储空间不足，下载已停止。可清除资源缓存后重试，或继续按需加载。": "Browser storage is full. Download paused. Clear the asset cache and retry, or keep loading assets on demand.",
@@ -24,19 +24,19 @@ index 6046bb3af3568612c2213256cf8caf8339f75e6c..65d196ce51a1cc27e5225e0b0911b0bf
 +  "发送中…": "Sending…"
  }
 diff --git a/public/index.html b/public/index.html
-index 63b918e5f55482894b8ca5fc4d422bd3567a55e2..eea1535bb00a3a9ace774c0dcb03e33f30e393ed 100644
+index 652c7ff7583abe0ce04f668fb2522580005a39e3..e8b2c95190212bf086eaf8587ceae89f789ac797 100644
 --- a/public/index.html
 +++ b/public/index.html
-@@ -39,6 +39,7 @@
-   <link rel="stylesheet" href="/css/screens/guide.css" />
+@@ -40,6 +40,7 @@
    <link rel="stylesheet" href="/css/screens/loadout.css" />
+   <link rel="stylesheet" href="/css/screens/stats.css" />
    <link rel="stylesheet" href="/css/emotes.css" />
 +  <link rel="stylesheet" href="/css/team-chat.css" />
    <link rel="stylesheet" href="/css/asset-prefetch.css" />
    <link rel="stylesheet" href="/css/devices.css" />
  
 diff --git a/public/js/main.js b/public/js/main.js
-index a08a8842c9ca3f9a79c73e34bba31e3d9c5975cb..3eac5cc42273d17f2f9a27341e028bf9a8e844f9 100644
+index ac293bd2323358e2c775619953de78549ba03ef5..68f98c6746812013445d13525aa1a0072eb84828 100644
 --- a/public/js/main.js
 +++ b/public/js/main.js
 @@ -45,6 +45,7 @@ import { LobbyScreen, rememberRoom, parseRoomParam } from './screens/lobby.js';
@@ -47,16 +47,16 @@ index a08a8842c9ca3f9a79c73e34bba31e3d9c5975cb..3eac5cc42273d17f2f9a27341e028bf9
  import { AssetPrefetchHost } from './ui/assetPrefetch.js';
  import { settingsStore } from './ui/settings.js';
  import { GuideHost } from './ui/guide.js';
-@@ -341,6 +342,7 @@ async function boot() {
-   }));
+@@ -354,6 +355,7 @@ async function boot() {
  
    wireNet();
+   installStatsRecorder(store); // follows the match on screen, so a 放弃模拟 can be recorded (ui/stats.js)
 +  installTeamChat({ net, store });
    installLoadoutSync({ net });
    installOwnershipSync({ net });
    installDiySync({ net });
 diff --git a/public/js/net.js b/public/js/net.js
-index b921a4449390ca1b5937123f6945c77da985e76d..75672073770fd8ee06580b766174de7e62e7e870 100644
+index 5916d3bd57da4f1af06fc6a8631d32a98dc2d6c3..a5e72caf8e10d08adcb8359668f09986532f6c6b 100644
 --- a/public/js/net.js
 +++ b/public/js/net.js
 @@ -421,7 +421,7 @@ export class Net {
@@ -90,7 +90,7 @@ index b921a4449390ca1b5937123f6945c77da985e76d..75672073770fd8ee06580b766174de7e
    }
  
 diff --git a/public/js/screens/game.js b/public/js/screens/game.js
-index 52a79eb0978f32d3412e3d860a65c762acf38df7..d0682d2849b3d83dc2a5b629248572becba7b6d3 100644
+index dfcdd24f27b7ec256f5c79209423a7c9c5e28722..8f24b1439419b0e7e5256f01c2c1b7e985cc9ce0 100644
 --- a/public/js/screens/game.js
 +++ b/public/js/screens/game.js
 @@ -79,6 +79,8 @@ import { ChoiceOverlay } from '../ui/choiceOverlay.js';
@@ -102,15 +102,15 @@ index 52a79eb0978f32d3412e3d860a65c762acf38df7..d0682d2849b3d83dc2a5b629248572be
  import { EffectsList } from '../ui/effectsList.js';
  import { CombatHud } from '../ui/combatHud.js';
  import { SettingsModal, settingsStore } from '../ui/settings.js';
-@@ -154,6 +156,7 @@ function MatchScreen() {
+@@ -158,6 +160,7 @@ function MatchScreen() {
    const myId = useStore((s) => s.me.playerId);
    const conn = useStore((s) => s.connection, shallowEqual);
    const emotes = useStore((s) => s.emotes);
 +  const room = useStore((s) => s.room);
    const roomSolo = useStore((s) => s.room?.mode === 'solo');
    const spectator = useStore((s) => isSpectating(s.room, s.me.playerId));
-   const gd = useGameData();
-@@ -172,6 +175,8 @@ function MatchScreen() {
+   // the room's spectator seats for the top bar's 观战席 capsule (ui/hud.js SpectatorPill; GitHub #120): room.state keeps coming
+@@ -185,6 +188,8 @@ function MatchScreen() {
    const [collapsed, setCollapsed] = useState(false);
    const [rewardMin, setRewardMin] = useState(false);
    const [emoteOpen, setEmoteOpen] = useState(false);
@@ -119,7 +119,7 @@ index 52a79eb0978f32d3412e3d860a65c762acf38df7..d0682d2849b3d83dc2a5b629248572be
    const [settingsOpen, setSettingsOpen] = useState(false);
    const [exitOpen, setExitOpen] = useState(false);
    const [drag, setDrag] = useState(null);                // { uid, kind, id } while dragging a piece
-@@ -197,6 +202,8 @@ function MatchScreen() {
+@@ -211,6 +216,8 @@ function MatchScreen() {
    const mode = phaseMode(phase);
    const combat = isCombatPhase(phase);
    const solo = roomSolo || String(pub?.modeId || '').includes('single');
@@ -128,21 +128,27 @@ index 52a79eb0978f32d3412e3d860a65c762acf38df7..d0682d2849b3d83dc2a5b629248572be
    const players = sortedPlayers(pub);
    const meP = players.find((p) => p.playerId === myId) || null;
    // a spectator seat watches like an eliminated player (it has no m.private and no row in m.public)
-@@ -271,7 +278,7 @@ function MatchScreen() {
+@@ -287,7 +294,7 @@ function MatchScreen() {
      getChess: (id) => { const c = gd.chess(id); return ownDiyRecord(c, priv, { chess: data.get('chess'), backups: data.get('backups') }) || c; },
      getToken: gd.token, getItem: gd.item, getEffect: gd.effect, backups: gd.backups,
    }), [priv, pub?.stageId, editable, gd.ready, deployField]);
--  live.current = { pub, priv, field, editable, placeCtx, watching, watchWho, home, myId, alive, spectator, detail, drawer, bondOpen, emoteOpen, settingsOpen, exitOpen, drag, facing, sel, selBusy, pen, collapsedNow: collapsed, localDone: false, canPause: false, paused };
-+  live.current = { pub, priv, field, editable, placeCtx, watching, watchWho, home, myId, alive, spectator, detail, drawer, bondOpen, emoteOpen, chatOpen, toolsOpen, settingsOpen, exitOpen, drag, facing, sel, selBusy, pen, collapsedNow: collapsed, localDone: false, canPause: false, paused };
+-  live.current = { pub, priv, field, editable, hasPersonalChoice, placeCtx, watching, watchWho, home, myId, alive, spectator, detail, drawer, bondOpen, emoteOpen, settingsOpen, exitOpen, drag, facing, sel, selBusy, pen, collapsedNow: collapsed, localDone: false, canPause: false, paused };
++  live.current = { pub, priv, field, editable, hasPersonalChoice, placeCtx, watching, watchWho, home, myId, alive, spectator, detail, drawer, bondOpen, emoteOpen, chatOpen, toolsOpen, settingsOpen, exitOpen, drag, facing, sel, selBusy, pen, collapsedNow: collapsed, localDone: false, canPause: false, paused };
  
    // ---- camera: every request goes through setCam, which remembers it for the pen's way back -----------------------
    // the own prep board: the normal board, or — in the prep of a boss round — the player's half of the boss field
-@@ -1153,9 +1160,11 @@ function MatchScreen() {
+@@ -1212,7 +1219,7 @@ function MatchScreen() {
        const act = shortcutFor(e, settingsStore.get().keys); // the player's key map (设置 → 快捷键)
        const L = live.current;
        // dialogs / the guide own the keyboard; behind the 本局信息 / 敌方情报 drawer only Esc (closing it) acts
 -      if (shortcutBlocked(act, { modal: !!document.querySelector('.modal, .guide'), drawer: !!L.drawer })) return;
 +      if (shortcutBlocked(act, { modal: !!document.querySelector('.modal, .guide'), drawer: !!L.drawer || L.chatOpen || L.toolsOpen })) return;
+       if (L.hasPersonalChoice) {
+         if (act !== 'escape') e.preventDefault();
+         if (act === 'ready') {
+@@ -1222,7 +1229,9 @@ function MatchScreen() {
+         return; // ChoiceOverlay handles Escape without cancelling the server's pending choice.
+       }
        if (act === 'escape') {
 -        if (L.emoteOpen) setEmoteOpen(false);
 +        if (L.chatOpen) setChatOpen(false);
@@ -151,7 +157,7 @@ index 52a79eb0978f32d3412e3d860a65c762acf38df7..d0682d2849b3d83dc2a5b629248572be
          else if (L.pen && !L.detail) togglePenRef.current(false);
          else if (L.bondOpen) setBondOpen(null);
          else if (L.detail) setDetail(null);
-@@ -1374,11 +1383,15 @@ function MatchScreen() {
+@@ -1459,11 +1468,15 @@ function MatchScreen() {
  
        <${Ticker} />
  
@@ -172,10 +178,10 @@ index 52a79eb0978f32d3412e3d860a65c762acf38df7..d0682d2849b3d83dc2a5b629248572be
  
        ${drawer ? html`<${EnemyDrawer} tab=${drawer} onTab=${setDrawer} pub=${pub} priv=${priv} onClose=${() => setDrawer(null)}
 diff --git a/server/lobby.js b/server/lobby.js
-index 0e0530f28d3c3ab6687c18266074df6f4aac621e..3d9255c62dcc6beaaca063eb1fc45acc0ea8d024 100644
+index 0a39fe84489148bbb777912cee332bb27e3f95e9..6093abf987bda44e6348fccc128c5d980304a255 100644
 --- a/server/lobby.js
 +++ b/server/lobby.js
-@@ -101,6 +101,7 @@ import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
+@@ -105,6 +105,7 @@ import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
  import { getData as defaultGetData, lookup } from './data.js';
  import { Match as DefaultMatch } from './match/Match.js';
  import { KITTED_CHARS } from './sim/content/kits/index.js';
@@ -183,7 +189,7 @@ index 0e0530f28d3c3ab6687c18266074df6f4aac621e..3d9255c62dcc6beaaca063eb1fc45acc
  
  /** Room code alphabet: uppercase letters without I and O (and no digits, so no 0/1). */
  export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-@@ -164,6 +165,7 @@ export class Room {
+@@ -190,6 +191,7 @@ export class Room {
      /** @type {{ live: boolean, ended: boolean, disposed: boolean, match: any } | null} */
      this.matchCtx = null;
      this.matchCount = 0;
@@ -191,15 +197,15 @@ index 0e0530f28d3c3ab6687c18266074df6f4aac621e..3d9255c62dcc6beaaca063eb1fc45acc
      /** @type {any} summary passed to onEnd by the last match */
      this.lastSummary = null;
      /**
-@@ -309,6 +311,7 @@ export class Lobby {
+@@ -336,6 +338,7 @@ export class Lobby {
        case 'room.create': return this.create(session, msg);
        case 'room.join': return this.join(session, msg);
        case 'room.leave': return this.leave(session);
 +      case 'room.chat': return this.chat(session, msg);
        case 'room.ready': return this.ready(session, msg);
        case 'room.setDifficulty': return this.setDifficulty(session, msg);
-       case 'room.addBot': return this.addBot(session);
-@@ -368,6 +371,28 @@ export class Lobby {
+       case 'room.setAiPicksLast': return this.setAiPicksLast(session, msg);
+@@ -396,6 +399,28 @@ export class Lobby {
    // room.* handlers
    // ---------------------------------------------------------------------------------------------------
  
@@ -229,10 +235,10 @@ index 0e0530f28d3c3ab6687c18266074df6f4aac621e..3d9255c62dcc6beaaca063eb1fc45acc
      const cur = this.roomOf(session);
      if (cur && cur.match) return fail(ERR.ROOM_STARTED, 'leave your running match first');
 diff --git a/server/net.js b/server/net.js
-index 341c433400b1f452bbfffa67ccbdf5f753d02376..191d73ef94ced07e7f7c8ff2ba2b048a4ec5147e 100644
+index ea815a88b0aefbf686073e6bcb1a8f801d716c5e..ecd4fadc38638a993d32ef73a284e9c4affecda4 100644
 --- a/server/net.js
 +++ b/server/net.js
-@@ -107,6 +107,8 @@ export class Session {
+@@ -108,6 +108,8 @@ export class Session {
      this.pendingResult = null;
      /** @type {number} ms epoch of the last full match resync (lobby-owned; throttles repeated hellos) */
      this.resyncAt = -Infinity;
@@ -240,28 +246,28 @@ index 341c433400b1f452bbfffa67ccbdf5f753d02376..191d73ef94ced07e7f7c8ff2ba2b048a
 +    this.lastChatAt = -Infinity;
      /** @type {Record<string, { skill: number, module: string|null }> | null} checked operator loadout (lobby-owned, DESIGN §16) */
      this.loadout = null;
-     /** @type {readonly string[] | null} checked not-owned chess ids (干员持有, lobby-owned, 0.2.0 补位) */
+     /** @type {Readonly<Record<string, { potential: number, cultivate: number }>> | null} checked per-operator 潜能 / 练度 (lobby-owned, 0.2.2; room.loadout `ops`) */
 diff --git a/shared/protocol.js b/shared/protocol.js
-index 19282a2aa7b3f9afa36d367b74fe653393ad70dc..53a1d290d3fd6abca48ab50a6d8b64b2684c388b 100644
+index 18bf69bd5f79c728bbc73558f63bc53047405477..176a93d139650d24866a65cff7d21a41a1e63f58 100644
 --- a/shared/protocol.js
 +++ b/shared/protocol.js
-@@ -4,6 +4,7 @@
- import { DIFFICULTIES, NAME_MAX_LEN, ROOM_CODE_LEN, MAX_SEATS, EMOTES, GEO } from './constants.js';
+@@ -5,6 +5,7 @@ import { DIFFICULTIES, NAME_MAX_LEN, ROOM_CODE_LEN, MAX_SEATS, EMOTES, GEO } fro
  import { isDroppableChess } from './standIn.js';
  import { diySlotIds, validateDiyPicks } from './diy.js';
+ import { cultivatedStats, isPotential, isCultivate, POTENTIAL_DEFAULT, CULTIVATE_DEFAULT } from './potential.js';
 +import { normalizeChatText } from './chat.js';
  
  // ---- tiny validators -------------------------------------------------------
  const isInt = (v, lo = -Infinity, hi = Infinity) => Number.isInteger(v) && v >= lo && v <= hi;
-@@ -323,6 +324,7 @@ export const C2S = {
+@@ -383,6 +384,7 @@ export const C2S = {
    'room.create': { mode: (v) => v === 'solo' || v === 'coop', difficulty: (v) => DIFFICULTIES.includes(v) },
    'room.join': { code: (v) => isStr(v, ROOM_CODE_LEN + 2) && /^[A-Za-z0-9]+$/.test(v) },
    'room.leave': {},
 +  'room.chat': { text: (v) => normalizeChatText(v) !== null },
    'room.ready': { ready: isBool },
    'room.setDifficulty': { difficulty: (v) => DIFFICULTIES.includes(v) },
-   'room.addBot': {},
-@@ -396,7 +398,7 @@ export const C2S = {
+   // the co-op room option 「AI 队友最后选择」 (GitHub #338; host, before the match): the strategy and 机变 drafts order every
+@@ -466,7 +468,7 @@ export const C2S = {
  // Server → client message types (documentation + client dispatch table keys).
  export const S2C = [
    'welcome', 'ok', 'error', 'pong',

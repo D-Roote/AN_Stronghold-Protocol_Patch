@@ -1,13 +1,13 @@
 diff --git a/public/i18n/en.json b/public/i18n/en.json
-index bbf29fcf5ecf3411aa8e17ba4d0d343a1ec49d0c..6046bb3af3568612c2213256cf8caf8339f75e6c 100644
+index d63f297a3e14bfcd5ad9f5772c43dff0bfecfa09..0f27345945af5264fdddea67b95e4cee5cbc6f4a 100644
 --- a/public/i18n/en.json
 +++ b/public/i18n/en.json
-@@ -1055,5 +1055,32 @@
-   "选择「{name}」的朝向": "Choose {name}'s facing",
-   "选择朝向": "Choose a facing",
-   "朝向：{dir}": "Facing: {dir}",
--  "开发版 · 不稳定，请勿用于公开服务器": "Development build · unstable, not for public servers"
-+  "开发版 · 不稳定，请勿用于公开服务器": "Development build · unstable, not for public servers",
+@@ -1183,5 +1183,32 @@
+   "精英2": "E2",
+   "精英2 Lv.60": "E2 Lv.60",
+   "开始模拟前可调整干员携带的技能与模组，以及潜能与练度；干员的局内等级不可调整": "Before the simulation starts you can change the Skills and Modules your Operators carry, and their potential and development; Operator levels in the match cannot be changed",
+-  "默认满潜能、精英2 Lv.60（满加成）。官方的潜能取你自己的潜能，练度是自持有加成（已持有的同名干员的养成，攻击 / 防御 / 生命单独乘算）；未持有的特许干员在官方按潜能1、没有加成，要照官方打请手动设为潜能1、未精英化。": "Default: max Potential, Elite 2 Lv.60 (the full bonus). Officially, Potential is your own and development is the owned-operator bonus (your training of the same Operator: ATK / DEF / HP, a separate multiplier); a licensed Operator you do not own fights at Potential 1 with no bonus — to play it that way, set Potential 1 and Non-Elite here."
++  "默认满潜能、精英2 Lv.60（满加成）。官方的潜能取你自己的潜能，练度是自持有加成（已持有的同名干员的养成，攻击 / 防御 / 生命单独乘算）；未持有的特许干员在官方按潜能1、没有加成，要照官方打请手动设为潜能1、未精英化。": "Default: max Potential, Elite 2 Lv.60 (the full bonus). Officially, Potential is your own and development is the owned-operator bonus (your training of the same Operator: ATK / DEF / HP, a separate multiplier); a licensed Operator you do not own fights at Potential 1 with no bonus — to play it that way, set Potential 1 and Non-Elite here.",
 +  "尚未开始": "Not started",
 +  "正在准备": "Preparing",
 +  "正在下载": "Downloading",
@@ -37,19 +37,19 @@ index bbf29fcf5ecf3411aa8e17ba4d0d343a1ec49d0c..6046bb3af3568612c2213256cf8caf83
 +  "下载暂时未完成。已保存的资源会保留，游戏仍可使用。": "Download is incomplete. Saved assets remain available and you can keep playing."
  }
 diff --git a/public/index.html b/public/index.html
-index 5895937aff1345ae992bf599a3c577bf493d515b..63b918e5f55482894b8ca5fc4d422bd3567a55e2 100644
+index d5991efafa26fda73d513f8def16bd927a7fb639..652c7ff7583abe0ce04f668fb2522580005a39e3 100644
 --- a/public/index.html
 +++ b/public/index.html
-@@ -39,6 +39,7 @@
-   <link rel="stylesheet" href="/css/screens/guide.css" />
+@@ -40,6 +40,7 @@
    <link rel="stylesheet" href="/css/screens/loadout.css" />
+   <link rel="stylesheet" href="/css/screens/stats.css" />
    <link rel="stylesheet" href="/css/emotes.css" />
 +  <link rel="stylesheet" href="/css/asset-prefetch.css" />
    <link rel="stylesheet" href="/css/devices.css" />
  
    <script type="importmap">
 diff --git a/public/js/main.js b/public/js/main.js
-index 5b109e9170deb2d0dd73682032bfc821f49b3c2f..a08a8842c9ca3f9a79c73e34bba31e3d9c5975cb 100644
+index 9aa062798c755353f90b31731af17bb449121892..ac293bd2323358e2c775619953de78549ba03ef5 100644
 --- a/public/js/main.js
 +++ b/public/js/main.js
 @@ -45,6 +45,7 @@ import { LobbyScreen, rememberRoom, parseRoomParam } from './screens/lobby.js';
@@ -60,27 +60,27 @@ index 5b109e9170deb2d0dd73682032bfc821f49b3c2f..a08a8842c9ca3f9a79c73e34bba31e3d
  import { settingsStore } from './ui/settings.js';
  import { GuideHost } from './ui/guide.js';
  import { installDeviceSupport } from './ui/device.js';
-@@ -287,6 +288,7 @@ function App() {
-     <${UiHosts} />
+@@ -297,6 +298,7 @@ function App() {
      <${GuideHost} />
      <${LoadoutHost} />
+     <${StatsHost} />
 +    <${AssetPrefetchHost} />
    </div>`;
  }
  
 diff --git a/public/js/ui/settings.js b/public/js/ui/settings.js
-index d7db406d11070268f379c23f1615acae7faa4582..63473e8c9b4cc8938a8e2d6544201b5a01861f60 100644
+index 237a7d8aa690859deb1f7ff77b2e05637b41e89a..b83fdcfae926a4beb4d605733283152ce121d380 100644
 --- a/public/js/ui/settings.js
 +++ b/public/js/ui/settings.js
-@@ -11,6 +11,7 @@ import { createStore, useStore, loadPref, savePref } from '../store.js';
- import { sanitizeSettings, HOTKEY_ACTIONS, DEFAULT_HOTKEYS, hotkeyLabel, rebindHotkey, isDefaultHotkeys, captureHotkey } from './gameLogic.js';
+@@ -15,6 +15,7 @@ import { createStore, useStore, loadPref, savePref, store } from '../store.js';
+ import { sanitizeSettings, HOTKEY_ACTIONS, DEFAULT_HOTKEYS, hotkeyLabel, rebindHotkey, isDefaultHotkeys, captureHotkey, VOICE_LANGS } from './gameLogic.js';
  import { audio } from '../audio.js';
  import { openGuide } from './guide.js';
 +import { openAssetPrefetchControls } from '../assetPrefetch.js';
  import { detectFeatures } from './device.js';
  import { LangToggle, machineTranslationNote } from './lang.js';
  import { t, tc, N_ } from '../../../shared/i18n.js';
-@@ -162,6 +163,10 @@ export function SettingsModal({ open, onClose }) {
+@@ -224,6 +225,10 @@ export function SettingsModal({ open, onClose }) {
          <${LangToggle} class="set-lang" />
        </div>
        ${mtNote ? html`<p class="set-hint set-lang-note" data-testid="lang-mt-note">${mtNote}</p>` : null}
@@ -90,4 +90,4 @@ index d7db406d11070268f379c23f1615acae7faa4582..63473e8c9b4cc8938a8e2d6544201b5a
 +      </div>
        <${Slider} label=${t('背景音乐')} micro="BGM" icon="play" value=${s.bgm} onInput=${(v) => updateSettings({ bgm: v })} />
        <${Slider} label=${t('干员语音')} micro="VOICE" icon="mic" value=${s.voice} onInput=${(v) => updateSettings({ voice: v })} />
-       <${Slider} label=${t('音效')} micro="SFX" icon="signal" value=${s.sfx}
+       <div class="set-row">

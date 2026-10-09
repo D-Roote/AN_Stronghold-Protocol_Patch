@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { AudioManager } from '../../public/js/audio.js';
-import { DEFAULT_VOICE_LANGUAGE, VOICE_LANGUAGES, normalizeVoiceLanguage, voiceBank } from '../../shared/voiceLanguages.js';
+import { DEFAULT_VOICE_LANGUAGE, VOICE_LANGUAGES, normalizeVoiceLanguage, voiceBank, migrateVoiceSettings } from '../../shared/voiceLanguages.js';
 
 const kr = '/assets/audio/voice/kr/char_a/cn_023.mp3';
 const jp = '/assets/audio/voice/jp/char_a/cn_023.mp3';
 const manifest = { audio: { voice: { char_legacy: { select: kr } }, voicePacks: {
-  kr: { char_a: { select: kr }, char_kr_only: { select: kr } }, jp: { char_a: { select: jp } },
+  kr: { char_a: { select: kr, place: kr }, char_kr_only: { select: kr } }, jp: { char_a: { select: jp, place: jp } },
 } } };
 
 test('voice choice defaults to KR, validates stored values, and never mixes in a different dub', () => {
@@ -22,6 +22,7 @@ test('voice choice defaults to KR, validates stored values, and never mixes in a
 
 test('switching languages resets the voice cooldown and affects only the voice channel', () => {
   const manager = new AudioManager({ win: null, getManifest: () => manifest });
+  manager.setVoiceLang(DEFAULT_VOICE_LANGUAGE);
   manager.ctx = {}; manager.voiceGain = {};
   const requested = [];
   manager._playVoice = (url) => requested.push(url);
@@ -29,32 +30,41 @@ test('switching languages resets the voice cooldown and affects only the voice c
   manager.bgmKey = 'combat';
   assert.equal(manager.voice('char_a', 'select', { unitKey: 1 }), true);
   const oldToken = manager.voiceToken;
-  manager.setVoiceLanguage('jp');
+  manager.setVoiceLang('jp');
   assert.ok(manager.voiceToken > oldToken, 'old deferred decodes are invalidated');
   assert.equal(manager.voice('char_a', 'select', { unitKey: 1 }), true, 'the same slot is immediately usable in JP');
   assert.deepEqual(requested, [kr, jp]);
   assert.equal(manager.voice('char_kr_only', 'select'), false);
   const current = manager.voiceToken;
-  manager.setVoiceLanguage('jp');
+  manager.setVoiceLang('jp');
   assert.equal(manager.voiceToken, current, 'reselecting the active language keeps its line playing');
-  manager.setVoiceLanguage('kr');
+  manager.setVoiceLang('kr');
   assert.deepEqual(manager.volumes, volumes);
   assert.equal(manager.bgmKey, 'combat');
 });
 
 test('an old KR decode resolving after a JP switch cannot start a sound or release the new channel', async () => {
   const manager = new AudioManager({ win: null, getManifest: () => manifest });
+  manager.setVoiceLang(DEFAULT_VOICE_LANGUAGE);
   let resolveOld;
   manager._buffer = () => new Promise((resolve) => { resolveOld = resolve; });
   let sources = 0;
   manager.ctx = { createBufferSource: () => { sources++; throw new Error('stale decode must not create a source'); } };
   manager.voiceGain = {};
-  assert.equal(manager.voice('char_a', 'select'), true);
-  manager.setVoiceLanguage('jp');
+  assert.equal(manager.voice('char_a', 'place'), true);
+  manager.setVoiceLang('jp');
   manager._playVoice = () => {};
-  assert.equal(manager.voice('char_a', 'select'), true);
+  assert.equal(manager.voice('char_a', 'place'), true);
   resolveOld({ duration: 1 });
   await Promise.resolve();
   assert.equal(sources, 0);
-  assert.equal(manager.voice('char_a', 'select'), false, 'the JP line still holds the gate');
+  assert.equal(manager.voice('char_a', 'place'), false, 'the JP line still holds the gate');
+});
+
+test('upgrading preserves the old JP preference once, while new settings take precedence', () => {
+  assert.deepEqual(migrateVoiceSettings(null, 'jp'), { voiceLang: 'jp' });
+  assert.deepEqual(migrateVoiceSettings({ bgm: .3 }, 'jp'), { bgm: .3, voiceLang: 'jp' });
+  assert.deepEqual(migrateVoiceSettings({ voiceLang: 'kr', muted: true }, 'jp'), { voiceLang: 'kr', muted: true });
+  assert.deepEqual(migrateVoiceSettings(null, null), { voiceLang: 'kr' });
+  assert.deepEqual(migrateVoiceSettings({ voiceLang: 'cn' }, 'jp'), { voiceLang: 'kr' });
 });

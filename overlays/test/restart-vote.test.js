@@ -29,6 +29,10 @@ describe('briefing restart: authoritative, reversible, unanimous human votes', (
     const host = await player('호스트');
     await ok(host, { t: 'room.create', mode: 'coop', difficulty: 'NORMAL' });
     const initial = await host.waitFor('room.state', (s) => s.hostId === host.id);
+    if (bot) {
+      await ok(host, { t: 'room.addBot' });
+      await ok(host, { t: 'room.setAiPicksLast', on: true });
+    }
     const people = [host];
     for (let i = 1; i < size; i++) {
       const peer = await player(`팀원${i}`);
@@ -37,7 +41,6 @@ describe('briefing restart: authoritative, reversible, unanimous human votes', (
       await ok(peer, { t: 'room.ready', ready: true });
       people.push(peer);
     }
-    if (bot) await ok(host, { t: 'room.addBot' });
     await ok(host, { t: 'room.start' });
     const publicState = await host.waitFor('m.public', (s) => s.phase === 'INFO_CHECK');
     const room = srv.lobby.getRoom(initial.code);
@@ -74,6 +77,8 @@ describe('briefing restart: authoritative, reversible, unanimous human votes', (
   test('all humans agree: old match stops, bans change, AI is excluded, room and chat sequence remain', async () => {
     const { host, people, room, matchNo, publicState } = await game(2, true);
     const old = room.match;
+    const ops = { char_102_texas: { potential: 2, cultivate: 1 } };
+    await ok(host, { t: 'room.loadout', entries: {}, ops });
     await vote(host, matchNo);
     const state = await host.waitFor('room.state', (s) => s.restartVote?.voters.length === 1);
     assert.equal(state.restartVote.total, 2);
@@ -91,6 +96,8 @@ describe('briefing restart: authoritative, reversible, unanimous human votes', (
     const fresh = await host.waitFor('m.public', (s) => s.phase === 'INFO_CHECK' && JSON.stringify(s.drawnDisabledBonds) !== JSON.stringify(publicState.drawnDisabledBonds));
     assert.ok(old.disposed);
     assert.notEqual(room.match, old);
+    assert.equal(room.match.aiPicksLast, true, 'the 0.2.2 room option survives the restart');
+    assert.deepEqual(room.match.players.get(host.id).ops, ops, 'per-operator cultivation survives the restart');
     assert.notDeepEqual(fresh.drawnDisabledBonds, publicState.drawnDisabledBonds);
     assert.ok(fresh.players.filter((p) => !p.isBot).every((p) => !p.ready));
     assert.equal(room.chatSeq, 1);

@@ -76,6 +76,21 @@ test('definitively missing individual JP lines are omitted, without filling them
   } finally { f.clean(); }
 });
 
+test('reuse the complete upstream JP bank without planning or downloading it twice', async () => {
+  const f = fixture();
+  try {
+    f.put('jp');
+    const bank = { [id]: { select: url('jp'), place: url('jp') } };
+    writeFileSync(f.path, JSON.stringify({ ...f.manifest, audio: { ...f.manifest.audio, voiceJp: bank } }));
+    const counts = await fetchVoicePacks(f.root, { offline: true, charword: {}, log: () => {},
+      download: async () => { throw new Error('upstream JP files are already available'); } });
+    const result = JSON.parse(readFileSync(f.path, 'utf8'));
+    assert.deepEqual(result.audio.voicePacks.jp, bank);
+    assert.equal(counts.jp.files, 1);
+    assert.equal(result.stats.files, 2);
+  } finally { f.clean(); }
+});
+
 test('transient download failures and empty JP packs leave the published primary manifest untouched', async () => {
   const f = fixture();
   try {

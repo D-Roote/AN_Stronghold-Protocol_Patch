@@ -1,8 +1,8 @@
 diff --git a/public/index.html b/public/index.html
-index 8008741644aecdcd5951ad5e21f7d0036da75d22..eea1535bb00a3a9ace774c0dcb03e33f30e393ed 100644
+index 2fd445ccedcf7d7c3936c657af160c2a10e79f29..d5991efafa26fda73d513f8def16bd927a7fb639 100644
 --- a/public/index.html
 +++ b/public/index.html
-@@ -68,9 +68,9 @@
+@@ -67,9 +67,9 @@
  
    <div class="rotate-hint" role="alert">
      <div class="rotate-hint__phone"></div>

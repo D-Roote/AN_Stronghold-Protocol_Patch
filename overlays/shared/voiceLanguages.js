@@ -10,6 +10,12 @@ export function normalizeVoiceLanguage(value) {
   return VOICE_LANGUAGES.some(({ id }) => id === value) ? value : DEFAULT_VOICE_LANGUAGE;
 }
 
+/** Keep the old separate voice preference when upgrading to upstream's unified settings. */
+export function migrateVoiceSettings(raw, legacy) {
+  const settings = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  return { ...settings, voiceLang: normalizeVoiceLanguage(settings.voiceLang ?? legacy) };
+}
+
 /** Keep the legacy default bank usable; a missing selected dub stays silent. */
 export function voiceBank(manifest, language = DEFAULT_VOICE_LANGUAGE) {
   const lang = normalizeVoiceLanguage(language);

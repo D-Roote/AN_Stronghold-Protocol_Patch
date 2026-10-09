@@ -1,8 +1,8 @@
 diff --git a/public/js/ui/lang.js b/public/js/ui/lang.js
-index 5f95bfbfdc20c924e1116e89477da476393abd36..1df36f868ac5bacfc4f22110f3d89040ac5a4a39 100644
+index 644318b5b721b5c16e81e6fdcfd78ce568bb7406..4cc90027005483d5d6510643295e53ca1fccdd01 100644
 --- a/public/js/ui/lang.js
 +++ b/public/js/ui/lang.js
-@@ -118,7 +118,7 @@ export async function loadLangChain(lang, doFetch = defaultFetch) {
+@@ -120,7 +120,7 @@ export async function loadLangChain(lang, doFetch = defaultFetch) {
  export const dataChain = (lang) => langChain(lang).filter((c) => langInfo(c)?.data !== false).map((c) => ({ code: c, url: langInfo(c)?.dataUrl }));
  
  /**
@@ -11,7 +11,7 @@ index 5f95bfbfdc20c924e1116e89477da476393abd36..1df36f868ac5bacfc4f22110f3d89040
   * code no pack is known for (boot without an index tries to load it).
   * @param {string} [search] location.search
   * @param {(key: string, fallback: any) => any} [load]
-@@ -132,7 +132,7 @@ export function initialLang(search = globalThis.location?.search || '', load = l
+@@ -134,7 +134,7 @@ export function initialLang(search = globalThis.location?.search || '', load = l
    if (fromUrl) return { lang: fromUrl, fromUrl: true };
    let stored = null;
    try { stored = pick(load(PREF_KEY, null)); } catch { /* ignore */ }
@@ -37,7 +37,7 @@ index 9b8182e8ca182284b057ebff75b1c424edafd436..088a6848a8d846f8ec3b052bf233768f
    assert.deepEqual([scriptOf('Stronghold Protocol'), scriptOf('卫戍协议'), scriptOf('堅守協定'), scriptOf('위수 협의'), scriptOf('Протокол')], ['alphabetic', 'cjk', 'cjk', 'cjk', 'alphabetic']);
    assert.deepEqual(langMetaOf(readPackIndex(index, 'lang')[1]).numberUnits, ['W', 'Y']);
 diff --git a/test/ui/i18n.e2e.test.js b/test/ui/i18n.e2e.test.js
-index dfd76425ae05ca384bfe5b300c41b6de41a83de1..387348e1499394ba94b91fa863e298467eeb8715 100644
+index eb955237a8a0c9c3bee5e5398871393642e8c9b6..d80f7e025bd90811b4b7830ecce077acec4f62f8 100644
 --- a/test/ui/i18n.e2e.test.js
 +++ b/test/ui/i18n.e2e.test.js
 @@ -2,12 +2,12 @@

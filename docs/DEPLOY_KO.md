@@ -19,7 +19,7 @@ Stronghold-Protocol/
   archive/                     이전 설치 및 분리 전 Git bundle (Git 제외)
 ~~~
 
-현재 pin은 원본 v0.2.1이다. Git SHA와 Full Release SHA256은 각각 소스와 로컬 에셋의 기준이다.
+현재 pin은 원본 v0.2.2이다. Git SHA와 Full Release SHA256은 각각 소스와 로컬 에셋의 기준이다.
 다운로드한 런타임 전체를 생성 소스에 덮어쓰지 않는다.
 원본 LICENSE/NOTICE를 유지하며, 게임 에셋은 저장소에 포함하지 않는다.
 
@@ -246,11 +246,11 @@ python3 scripts/project.py prepare
 | 01-002 | Build-japanese-voice-pack | KR/JP 음성팩 동시 준비와 검사 |
 | 02-001 | UI-korean-first-visit | 최초 한국어와 언어 검사 |
 | 02-002 | UI-mobile-orientation-ko | 모바일 회전 안내 |
-| 02-003 | UI-title-controls | 이름 화면 가운데 상태·설명, 우하단 설정·전체화면 |
+| 02-003 | UI-title-controls | 이름 화면 가운데 상태·설명, 우하단 통계·설정·전체화면 |
 | 03-001 | Feat-asset-prefetch | 에셋 사전 다운로드 |
 | 03-002 | Feat-team-chat | 기본 채팅과 접이식 메뉴 |
 | 03-003 | Feat-session-chat-factions | 세션 채팅·진영·전략 선택 UI |
-| 03-004 | Feat-voice-language | 설정의 음성 언어 선택과 재생 전환 |
+| 03-004 | Feat-voice-language | 원본 음성 설정에 KR/JP 통합, 기존 선택값 이관 |
 | 03-005 | Feat-briefing-restart-vote | 정보 확인 채팅·전원 재시작 투표 |
 | 04-001 | Resource-ai-teammate-limit | 방별 추가 AI 제한 |
 
@@ -356,12 +356,22 @@ update는 원본 태그를 조회하고 GitHub Full Release digest를 확인한�
 ZIP SHA256, 경로, manifest 항목 수와 모든 참조 파일을 확인한 뒤 버전별 폴더에 보관한다.
 기존 운영 볼륨을 덮어쓰지 않고 configure에서 해당 버전 경로를 선택한다.
 원본 0.1.3에서 0.2.1로는 소환물 39개·파일 117개가 추가되며, manifest는 1481에서 1598개가 된다.
-한국어 음성은 별도의 KR 빌드를 사용하며, CN Full Release의 음성을 복사하지 않는다.
+0.2.1과 0.2.2의 로컬 manifest 1598항목과 로컬 파일 1611개는 동일하지만, 버전별 Full Release에서
+다시 추출하고 검증한다. 일본어 음성은 0.2.2 원본의 다운로드 결과를 검증해 재사용한다.
+한국어 음성은 별도의 KR 빌드를 사용하며, Full Release의 중국어 음성을 복사하지 않는다.
+
+0.2.2의 개별 오퍼레이터 잠재능력·육성 설정, 통계 페이지, AI 팀원 마지막 선택과 게임 규칙 수정은
+원본 동작을 사용한다. 재시작 투표 후에도 개별 육성 설정과 AI 선택 순서는 유지한다.
+이름 화면의 통계 버튼은 설정·전체화면과 함께 우하단에 배치한다. 음성 설정은 원본의
+`settings.voiceLang` 하나로 관리하며, 이전 `voiceLanguage` 선택값은 최초 이관에 사용한다.
+한국어가 기본이며, KR/JP 팩에서 선택 언어의 음성이 없으면 다른 언어로 대체하지 않고 무음 처리한다.
+좁은 모바일 화면의 로비·파티 상단은 제목과 버튼을 두 줄로 나누어 통계·설정·플레이 방법이
+제목을 가리지 않도록 한다.
 
 검증한 lock·패치·스크립트를 main에 합쳐 push한 다음 service/에서 docker compose -f stack.cf-tunnel.yaml up -d로 운영에 적용한다.
 반영 후 보조 검사 python3 ../scripts/project.py verify를 사용할 수 있다.
 원본 tag 이름은 lock에 기록하며, 이 자체 저장소에는 원본 tag를 가져올 필요가 없다.
-자체 릴리스에는 ko/v0.2.1-r1 같은 이름을 사용할 수 있다.
+자체 릴리스에는 ko/v0.2.2-r1 같은 이름을 사용할 수 있다.
 
 ## 상태와 종료
 

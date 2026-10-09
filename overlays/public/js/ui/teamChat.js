@@ -135,7 +135,7 @@ function useDismissible({ rootRef, toggleRef, focusRef, open, onToggle, onEscape
     focusRef?.current?.focus({ preventScroll: true });
     const outside = (event) => { if (!rootRef.current?.contains(event.target)) latest.current(false); };
     const escape = (event) => {
-      if (event.key !== 'Escape' || doc.querySelector('.modal, .guide')) return;
+      if (event.key !== 'Escape' || doc.querySelector('.modal, .guide, [role="dialog"][aria-modal="true"]')) return;
       event.preventDefault();
       event.stopPropagation();
       if (escapeFirst.current?.()) return;
@@ -160,7 +160,7 @@ function useChatEnterShortcut(options) {
     const enter = (event) => {
       if (event.key !== 'Enter' || event.defaultPrevented || event.isComposing || event.keyCode === 229
         || event.repeat || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey
-        || doc.querySelector('.modal, .guide')) return;
+        || doc.querySelector('.modal, .guide, [role="dialog"][aria-modal="true"]')) return;
       const current = latest.current;
       const target = event.target;
       if (target?.closest?.('[role="dialog"]')) return;
